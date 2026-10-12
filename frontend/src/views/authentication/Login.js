@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Grid, Box, Card, Stack, Typography } from '@mui/material';
+import { Grid, Box, Card, Stack, Typography, Alert, Button } from '@mui/material';
 
 import PageContainer from 'src/components/container/PageContainer';
 import Logo from 'src/layouts/full/shared/logo/Logo';
@@ -13,7 +13,7 @@ import { useDispatch, useSelector } from 'react-redux';
 
 import { useLoginMutation } from './../../slices/usersApiSlice';
 
-import { setCredentials } from './../../slices/authSlice';
+import { setCredentials, logout } from './../../slices/authSlice';
 import { toast } from 'react-toastify';
 import Loader from './Loader';
 
@@ -45,12 +45,6 @@ const Login = () => {
 
   const { userInfo } = useSelector((state) => state.auth);
 
-  useEffect(() => {
-    if (userInfo) {
-      navigate('/');
-    }
-  }, [navigate, userInfo]);
-
   const handleSubmit = async ({ email, password }) => {
     try {
       const res = await login({ email, password }).unwrap();
@@ -58,15 +52,15 @@ const Login = () => {
       dispatch(setCredentials({ ...res }));
       formik.resetForm();
 
-      const redirectLocation = JSON.parse(localStorage.getItem('redirectLocation'));
-      if (redirectLocation) {
-        localStorage.removeItem('redirectLocation');
-        navigate(redirectLocation.pathname);
+      const userRole = (res.role || '').toLowerCase();
+      toast.success(`Welcome back, ${res.name || 'User'}!`);
+      if (userRole.includes('teacher') || userRole.includes('admin')) {
+        navigate('/admin-dashboard');
       } else {
-        navigate('/');
+        navigate('/dashboard');
       }
     } catch (err) {
-      toast.error(err?.data?.message || err.error);
+      toast.error(err?.data?.message || err.error || 'Login failed');
     }
   };
 
@@ -101,19 +95,54 @@ const Login = () => {
             <Card elevation={9} sx={{ p: 4, zIndex: 1, width: '100%', maxWidth: '500px' }}>
               <Box display="flex" alignItems="center" justifyContent="center">
                 <Typography
-                  variant="h4" // Choose a suitable variant (h1, h2, h3, h4, h5, h6, subtitle1, subtitle2, body1, body2, etc.)
-                  component="h1" // This will render an <h1> element
+                  variant="h4"
+                  component="h1"
                   style={{
                     fontWeight: 'bold',
-                    color: '#1976d2', // Primary color or any color you prefer
-                    margin: '20px 0',
+                    color: '#1976d2',
+                    margin: '15px 0',
                     textAlign: 'center',
-                    textShadow: '1px 1px 2px rgba(0, 0, 0, 0.3)', // Optional shadow effect
+                    textShadow: '1px 1px 2px rgba(0, 0, 0, 0.3)',
                   }}
                 >
                   AI_Evalu8
                 </Typography>
               </Box>
+
+              {userInfo && (
+                <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>
+                  <Typography variant="body2" fontWeight={600}>
+                    Currently signed in as: {userInfo.name || userInfo.email} ({userInfo.role})
+                  </Typography>
+                  <Box mt={1} display="flex" gap={1}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => {
+                        const role = (userInfo.role || '').toLowerCase();
+                        navigate(role.includes('teacher') || role.includes('admin') ? '/admin-dashboard' : '/dashboard');
+                      }}
+                      sx={{ textTransform: 'none', fontWeight: 600 }}
+                    >
+                      Go to Dashboard
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      onClick={() => {
+                        dispatch(logout());
+                        localStorage.clear();
+                        sessionStorage.clear();
+                      }}
+                      sx={{ textTransform: 'none', fontWeight: 600 }}
+                    >
+                      Sign Out / Switch
+                    </Button>
+                  </Box>
+                </Alert>
+              )}
+
               <AuthLogin
                 formik={formik}
                 subtext={
@@ -122,23 +151,37 @@ const Login = () => {
                   </Typography>
                 }
                 subtitle={
-                  <Stack direction="row" spacing={1} justifyContent="center" mt={3}>
-                    <Typography color="textSecondary" variant="h6" fontWeight="500">
-                      New to Modernize?
+                  <Box mt={3} textAlign="center">
+                    <Typography color="textSecondary" variant="body2" mb={1}>
+                      Don't have an account yet?
                     </Typography>
-                    <Typography
-                      component={Link}
-                      to="/auth/register"
-                      fontWeight="500"
-                      sx={{
-                        textDecoration: 'none',
-                        color: 'primary.main',
-                      }}
-                    >
-                      Create an account
-                    </Typography>
+                    <Stack direction="row" spacing={2} justifyContent="center" alignItems="center">
+                      <Typography
+                        component={Link}
+                        to="/auth/register"
+                        fontWeight="600"
+                        sx={{
+                          textDecoration: 'none',
+                          color: 'primary.main',
+                        }}
+                      >
+                        Register as Student
+                      </Typography>
+                      <Typography color="textSecondary">|</Typography>
+                      <Typography
+                        component={Link}
+                        to="/auth/register"
+                        fontWeight="600"
+                        sx={{
+                          textDecoration: 'none',
+                          color: 'secondary.main',
+                        }}
+                      >
+                        Register as Teacher
+                      </Typography>
+                    </Stack>
                     {isLoading && <Loader />}
-                  </Stack>
+                  </Box>
                 }
               />
             </Card>

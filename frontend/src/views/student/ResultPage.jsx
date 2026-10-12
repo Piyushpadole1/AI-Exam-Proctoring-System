@@ -58,28 +58,23 @@ const ResultPage = () => {
       try {
         setLoading(true);
         // Fetch all exams first
-        const examsResponse = await axiosInstance.get('/api/users/exam', {
-          withCredentials: true,
-        });
-        setExams(examsResponse.data);
+        const examsResponse = await axiosInstance.get('/api/users/exam');
+        setExams(Array.isArray(examsResponse.data) ? examsResponse.data : []);
 
         // Fetch results based on user role
-        if (userInfo?.role === 'teacher') {
-          // For teachers, fetch all results
-          const resultsResponse = await axiosInstance.get('/api/users/results/all', {
-            withCredentials: true,
-          });
-          setResults(resultsResponse.data.data);
+        const role = (userInfo?.role || '').toLowerCase();
+        if (role.includes('teacher') || role.includes('admin')) {
+          // For teachers/admins, fetch results for their exams
+          const resultsResponse = await axiosInstance.get('/api/users/results/all');
+          setResults(Array.isArray(resultsResponse.data?.data) ? resultsResponse.data.data : []);
         } else {
           // For students, fetch only their visible results
-          const resultsResponse = await axiosInstance.get('/api/users/results/user', {
-            withCredentials: true,
-          });
-          setResults(resultsResponse.data.data);
+          const resultsResponse = await axiosInstance.get('/api/users/results/user');
+          setResults(Array.isArray(resultsResponse.data?.data) ? resultsResponse.data.data : []);
         }
       } catch (err) {
-        setError(err.response?.data?.message || 'Failed to fetch data');
-        toast.error('Failed to fetch data');
+        console.error('Error fetching results data:', err);
+        setError(err.response?.data?.message || 'Failed to load results');
       } finally {
         setLoading(false);
       }

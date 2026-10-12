@@ -36,13 +36,12 @@ ProctoAI-MERN utilizes a range of technologies to provide its comprehensive func
 
 ### Backend
 
-- **Node.js:** A JavaScript runtime for server-side development.
-- **Express:** A minimal and flexible Node.js web application framework.
-- **MongoDB:** A NoSQL database for storing user data.
-- **Mongoose:** An elegant MongoDB object modeling tool.
-- **JSON Web Tokens (JWT):** Used for secure authentication and authorization.
-- **bcryptjs:** A library for securely hashing passwords.
-- **Express-Async-Handler:** Middleware to handle exceptions in asynchronous route handlers.
+- **Java 21 (LTS):** Core programming language.
+- **Spring Boot 3.4.3:** Production-grade Java framework for enterprise REST APIs and security.
+- **Spring Data JPA & Hibernate:** ORM and data persistence layer.
+- **MySQL 8.0:** Relational database for high-performance ACID transactions and data integrity.
+- **Spring Security 6 & JJWT:** Token-based stateless authentication, RBAC, and client/exam isolation.
+- **Scoring Engine:** Real-time hybrid AI cheating penalty calculation and automatic disqualification.
 
 ### Frontend
 
@@ -171,10 +170,40 @@ ProctoAI-MERN utilizes a range of technologies to provide its comprehensive func
 More features and improvements are in development and will be included in future updates.
 
 ## How to Run
+ 
+### Prerequisites
+- **Java 21 JDK** installed and configured on your `PATH`.
+- **MySQL 8.0 Server** running with database `ai_eval8_db` (or create database automatically with credentials in `backend-spring/src/main/resources/application.properties`).
+- **Node.js** (v18+) and npm.
 
-To run this project locally, follow these steps:
+### Quick Start
 
-1. Clone this repository.
-2. Install the required dependencies in both the frontend and backend folders.
-3. Start the server using `npm start` in the backend folder.
-4. Start the React app using `npm start` in the frontend folder.
+#### Option 1: Run via Root Batch Script (Windows)
+1. Double click `run-spring.bat` or run:
+   ```cmd
+   run-spring.bat
+   ```
+2. In a separate terminal, launch the frontend:
+   ```cmd
+   npm run client
+   ```
+
+#### Option 2: Run Concurrently via npm
+From the project root:
+```cmd
+npm run dev
+```
+*(Starts both Spring Boot on `http://localhost:5000` and React on `http://localhost:3000`)*
+
+#### Option 3: Manual Startup
+1. **Backend (Spring Boot)**:
+   ```cmd
+   cd backend-spring
+   mvn clean package -DskipTests
+   java -jar target/examproctoring-1.0.0.jar
+   ```
+2. **Frontend (React)**:
+   ```cmd
+   cd frontend
+   npm start
+   ```

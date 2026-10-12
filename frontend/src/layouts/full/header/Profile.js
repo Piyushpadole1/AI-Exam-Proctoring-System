@@ -41,9 +41,14 @@ const Profile = () => {
   const logoutHandler = async () => {
     try {
       await logoutApiCall().unwrap();
+    } catch (err) {
+      console.warn('Logout API notice:', err);
+    } finally {
       dispatch(logout());
-      navigate('/auth/login');
-    } catch (err) {}
+      localStorage.clear();
+      sessionStorage.clear();
+      navigate('/auth/login', { replace: true });
+    }
   };
   return (
     <Box>

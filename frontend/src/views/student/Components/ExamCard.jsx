@@ -3,56 +3,93 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardMedia from '@mui/material/CardMedia';
 import Typography from '@mui/material/Typography';
-import { CardActionArea, IconButton, Stack, Box } from '@mui/material';
+import { CardActionArea, IconButton, Stack, Box, Chip } from '@mui/material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import LockIcon from '@mui/icons-material/Lock';
 import { useNavigate } from 'react-router-dom';
 import DeleteIcon from '../../teacher/components/DeleteIcon';
 import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 
-const imgUrl =
-  'https://images.unsplash.com/photo-1555949963-aa79dcee981c?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MjB8fGNvbXB1dGVyJTIwc2NpZW5jZXxlbnwwfHwwfHx8MA%3D%3D&w=1000&q=80';
+const defaultImg =
+  'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80';
 
 export default function ExamCard({ exam }) {
-  const { examName, duration, totalQuestions, examId, liveDate, deadDate } = exam;
+  const { examName, duration, totalQuestions, examId, subject, isEnrolled, teacherName, totalMarks } = exam;
   const { userInfo } = useSelector((state) => state.auth);
-  const isTeacher = userInfo?.role === 'teacher';
-
+  const isTeacher = (userInfo?.role || '').toLowerCase().includes('teacher');
   const navigate = useNavigate();
-  const isExamActive = true;
 
   const handleCardClick = () => {
-    if (isTeacher) {
-      toast.error('You are a teacher, you cannot take this exam');
+    if (!isTeacher && !isEnrolled) {
+      toast.warning('Enrollment Required: You are not enrolled in this exam. Only authorized students may enter.');
+      return;
     }
-    if (isExamActive && !isTeacher) {
-      navigate(`/exam/${examId}`);
-    }
+    navigate(`/exam/${examId}`);
   };
 
   return (
-    <Card>
-      <CardActionArea onClick={handleCardClick}>
-        <CardMedia component="img" height="140" image={imgUrl} alt="Exam" />
-        <CardContent>
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Typography gutterBottom variant="h5" component="div">
-              {examName}
-            </Typography>
-            {/* Delete icon at the right end - only show for teachers */}
-            {isTeacher && (
-              <IconButton aria-label="delete">
-                <DeleteIcon examId={examId} />
-              </IconButton>
+    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', borderRadius: 2 }}>
+      <CardActionArea onClick={handleCardClick} sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+        <Box sx={{ position: 'relative' }}>
+          <CardMedia component="img" height="140" image={defaultImg} alt="Exam" />
+          <Box sx={{ position: 'absolute', top: 10, right: 10 }}>
+            {isTeacher ? (
+              <Chip label="Faculty Mode" size="small" color="secondary" />
+            ) : isEnrolled ? (
+              <Chip
+                icon={<CheckCircleIcon />}
+                label="Enrolled"
+                size="small"
+                color="success"
+                sx={{ fontWeight: 600 }}
+              />
+            ) : (
+              <Chip
+                icon={<LockIcon />}
+                label="Requires Enrollment"
+                size="small"
+                color="warning"
+                sx={{ fontWeight: 600 }}
+              />
             )}
-          </Stack>
+          </Box>
+        </Box>
 
-          <Typography variant="body2" color="text.secondary">
-            MCQ
-          </Typography>
+        <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <Box>
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+              <Typography gutterBottom variant="h5" component="div" fontWeight={700}>
+                {examName}
+              </Typography>
+              {isTeacher && (
+                <IconButton
+                  aria-label="delete"
+                  onClick={(e) => e.stopPropagation()}
+                  size="small"
+                >
+                  <DeleteIcon examId={examId} />
+                </IconButton>
+              )}
+            </Stack>
 
-          <Stack direction="row" alignItems="center" justifyContent="space-between" mt={1}>
-            <Typography variant="h6">{totalQuestions} ques</Typography>
-            <Typography color="textSecondary">{duration}</Typography>
+            <Typography variant="body2" color="primary" fontWeight={600} mb={1}>
+              {subject || 'General Assessment'} &nbsp;•&nbsp; Code: {examId}
+            </Typography>
+            {teacherName && (
+              <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                Instructor: {teacherName}
+              </Typography>
+            )}
+          </Box>
+
+          <Stack direction="row" alignItems="center" justifyContent="space-between" mt={2} pt={1} sx={{ borderTop: '1px solid #f0f0f0' }}>
+            <Typography variant="body2" color="textSecondary" fontWeight={500}>
+              {totalQuestions || 0} Questions
+            </Typography>
+            <Typography variant="body2" color="textSecondary" fontWeight={500}>
+              {duration ? `${duration} mins` : '30 mins'}
+            </Typography>
           </Stack>
         </CardContent>
       </CardActionArea>

@@ -1,11 +1,31 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+const API_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
 console.log(API_URL);
 
 const axiosInstance = axios.create({
   baseURL: API_URL,
-  // you can add other defaults here if needed
+});
+
+axiosInstance.interceptors.request.use((config) => {
+  let token = localStorage.getItem('token');
+  if (!token) {
+    try {
+      const userInfoStr = localStorage.getItem('userInfo');
+      if (userInfoStr) {
+        const parsed = JSON.parse(userInfoStr);
+        token = parsed?.token;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  if (token && token !== 'null' && token !== 'undefined') {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
 });
 
 export default axiosInstance;

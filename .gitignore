@@ -39,6 +39,6 @@ coverage/
 # Ignore Python files
 *.py
 
-# Ignore Java files
-*.java
+# Java / Maven build output
+target/
 *.class

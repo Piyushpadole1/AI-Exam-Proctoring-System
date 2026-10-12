@@ -24,6 +24,7 @@ const ExamDetails = Loadable(lazy(() => import('./../views/student/ExamDetails')
 const CodeDetails = Loadable(lazy(() => import('../views/student/CodeDetails')));
 const ResultPage = Loadable(lazy(() => import('./../views/student/ResultPage')));
 const Coder = Loadable(lazy(() => import('../views/student/Coder')));
+const ProctoringReport = Loadable(lazy(() => import('../views/student/ProctoringReport')));
 //Auth Routes
 const Error = Loadable(lazy(() => import('../views/authentication/Error')));
 const Register = Loadable(lazy(() => import('../views/authentication/Register')));
@@ -44,17 +45,31 @@ const AnalyticsPage = Loadable(lazy(() => import('./../views/teacher/AnalyticsPa
 const LiveMonitoringPage = Loadable(lazy(() => import('./../views/teacher/LiveMonitoringPage')));
 
 // Common/Student Routes
-const ProctoringReport = Loadable(lazy(() => import('./../views/student/ProctoringReport')));
+// Role-based Root Redirect
+const RoleBasedRedirect = () => {
+  const { userInfo } = useSelector((state) => state.auth);
+  if (!userInfo) {
+    return <Navigate to="/auth/login" replace />;
+  }
+  const role = (userInfo.role || '').toLowerCase();
+  if (role.includes('teacher') || role.includes('admin')) {
+    return <Navigate to="/admin-dashboard" replace />;
+  }
+  return <Navigate to="/dashboard" replace />;
+};
+
 const Router = createBrowserRouter(
   createRoutesFromElements(
     // Every router we create will now go in here as
     // they going to be child of our main App component
     <>
+      {/* Root lands directly on login/register page */}
+      <Route path="/" element={<Navigate to="/auth/login" replace />} />
+
       {/* // Private Routes */}
       <Route path="" element={<PrivateRoute />}>
         {/* // Main layout */}
-        <Route path="/" element={<FullLayout />}>
-          <Route index={true} path="/" element={<Navigate to="/dashboard" />} />
+        <Route element={<FullLayout />}>
           <Route path="/dashboard" exact={true} element={<ExamPage />} />
           <Route path="/sample-page" exact={true} element={<SamplePage />} />
           <Route path="/Success" exact={true} element={<Success />} />

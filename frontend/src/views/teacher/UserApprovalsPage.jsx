@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Paper,
@@ -17,227 +17,367 @@ import {
   Stack,
   Alert,
   Tooltip,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Card,
+  CardContent,
+  Tabs,
+  Tab,
+  IconButton,
 } from '@mui/material';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import CancelIcon from '@mui/icons-material/Cancel';
-import PersonIcon from '@mui/icons-material/Person';
 import SchoolIcon from '@mui/icons-material/School';
+import HowToRegIcon from '@mui/icons-material/HowToReg';
 import PageContainer from 'src/components/container/PageContainer';
 import DashboardCard from '../../components/shared/DashboardCard';
-import {
-  useGetPendingUsersQuery,
-  useApproveUserMutation,
-  useRejectUserMutation,
-} from '../../slices/usersApiSlice';
+import axiosInstance from '../../axios';
+import { useGetExamsQuery } from '../../slices/examApiSlice';
 import { toast } from 'react-toastify';
 
 const UserApprovalsPage = () => {
-  const [filter, setFilter] = useState('');
+  const { data: exams, isLoading: examsLoading } = useGetExamsQuery();
 
-  const {
-    data: pendingUsers,
-    isLoading,
-    error,
-    refetch,
-  } = useGetPendingUsersQuery(undefined, { pollingInterval: 15000 });
+  const [selectedExamId, setSelectedExamId] = useState('');
+  const [enrolledStudents, setEnrolledStudents] = useState([]);
+  const [allStudents, setAllStudents] = useState([]);
+  const [loadingEnrollments, setLoadingEnrollments] = useState(false);
+  const [loadingAllStudents, setLoadingAllStudents] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const [approveUser, { isLoading: approving }] = useApproveUserMutation();
-  const [rejectUser, { isLoading: rejecting }] = useRejectUserMutation();
+  const [emailToEnroll, setEmailToEnroll] = useState('');
+  const [studentFilter, setStudentFilter] = useState('');
+  const [tabValue, setTabValue] = useState(0);
 
-  const handleApprove = async (id, email) => {
+  // Set default selected exam once exams load
+  useEffect(() => {
+    if (exams && exams.length > 0 && !selectedExamId) {
+      setSelectedExamId(exams[0].examId);
+    }
+  }, [exams, selectedExamId]);
+
+  // Fetch all registered students
+  const fetchAllStudents = async () => {
     try {
-      await approveUser(id).unwrap();
-      toast.success(`✅ ${email} has been approved and can now log in.`);
-      refetch();
+      setLoadingAllStudents(true);
+      const res = await axiosInstance.get('/api/users/students');
+      setAllStudents(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to approve user');
+      console.error('Error fetching students:', err);
+    } finally {
+      setLoadingAllStudents(false);
     }
   };
 
-  const handleReject = async (id, email) => {
+  // Fetch enrolled students for selected exam
+  const fetchEnrolledStudents = async (examCode) => {
+    if (!examCode) return;
     try {
-      await rejectUser(id).unwrap();
-      toast.info(`❌ ${email} registration has been rejected.`);
-      refetch();
+      setLoadingEnrollments(true);
+      const res = await axiosInstance.get(`/api/users/exam/${examCode}/enrolled-students`);
+      setEnrolledStudents(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to reject user');
+      console.error('Error fetching enrolled students:', err);
+    } finally {
+      setLoadingEnrollments(false);
     }
   };
 
-  const filtered = (pendingUsers || []).filter(
-    (u) =>
-      u.name?.toLowerCase().includes(filter.toLowerCase()) ||
-      u.email?.toLowerCase().includes(filter.toLowerCase()) ||
-      u.role?.toLowerCase().includes(filter.toLowerCase()),
+  useEffect(() => {
+    fetchAllStudents();
+  }, []);
+
+  useEffect(() => {
+    if (selectedExamId) {
+      fetchEnrolledStudents(selectedExamId);
+    }
+  }, [selectedExamId]);
+
+  // Handle Quick Enroll by Email
+  const handleEnrollByEmail = async () => {
+    if (!emailToEnroll.trim()) {
+      toast.error('Please enter student email.');
+      return;
+    }
+    try {
+      setActionLoading(true);
+      const res = await axiosInstance.post(`/api/users/exam/${selectedExamId}/enroll-student`, {
+        email: emailToEnroll.trim(),
+      });
+      toast.success(res.data.message || 'Student enrolled successfully!');
+      setEmailToEnroll('');
+      fetchEnrolledStudents(selectedExamId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.response?.data?.message || 'Failed to enroll student');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Enroll from Table
+  const handleEnrollStudent = async (student) => {
+    try {
+      setActionLoading(true);
+      const res = await axiosInstance.post(`/api/users/exam/${selectedExamId}/enroll-student`, {
+        studentId: student.id || student._id,
+        email: student.email,
+      });
+      toast.success(`Enrolled ${student.name} in exam!`);
+      fetchEnrolledStudents(selectedExamId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.response?.data?.message || 'Failed to enroll student');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Unenroll
+  const handleUnenrollStudent = async (studentId, studentName) => {
+    try {
+      setActionLoading(true);
+      await axiosInstance.delete(`/api/users/exam/${selectedExamId}/unenroll-student/${studentId}`);
+      toast.info(`Removed ${studentName} from exam.`);
+      fetchEnrolledStudents(selectedExamId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to unenroll student');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const enrolledStudentIds = new Set(enrolledStudents.map((s) => String(s.studentId)));
+
+  const availableToEnroll = allStudents.filter(
+    (s) =>
+      !enrolledStudentIds.has(String(s.id)) &&
+      !enrolledStudentIds.has(String(s._id)) &&
+      (s.name?.toLowerCase().includes(studentFilter.toLowerCase()) ||
+        s.email?.toLowerCase().includes(studentFilter.toLowerCase()) ||
+        s.studentIdNumber?.toLowerCase().includes(studentFilter.toLowerCase())),
+  );
+
+  const filteredEnrolled = enrolledStudents.filter(
+    (s) =>
+      s.name?.toLowerCase().includes(studentFilter.toLowerCase()) ||
+      s.email?.toLowerCase().includes(studentFilter.toLowerCase()) ||
+      s.studentIdNumber?.toLowerCase().includes(studentFilter.toLowerCase()),
   );
 
   return (
-    <PageContainer title="User Approvals" description="Approve or reject new user registrations">
-      <DashboardCard title="User Registration Approvals">
+    <PageContainer title="Student Enrollment" description="Manage Exam Student Authorizations">
+      <DashboardCard title="Exam-Wise Student Enrollment & Authorization">
         <Box>
-          {/* Info bar */}
-          <Alert severity="info" sx={{ mb: 2 }}>
-            New users who register on the platform need your approval before they can log in. Review
-            their details below and <strong>Approve</strong> or <strong>Reject</strong> each
-            request.
+          <Alert severity="info" sx={{ mb: 3 }}>
+            <strong>Strict Exam Authorization:</strong> Only students explicitly enrolled below are
+            permitted to participate in the selected exam. Even with the exam credentials, unenrolled
+            students are denied access.
           </Alert>
 
-          {/* Filter */}
-          <Paper sx={{ p: 2, mb: 2 }}>
-            <TextField
-              label="Filter by name, email or role"
-              variant="outlined"
-              fullWidth
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search pending registrations..."
-            />
+          {/* Exam Selector & Quick Enroll */}
+          <Paper elevation={0} sx={{ p: 3, mb: 3, backgroundColor: '#f8fafc', borderRadius: 2 }}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
+              <FormControl sx={{ minWidth: 260 }} size="small">
+                <InputLabel id="exam-select-label">Select Exam to Manage</InputLabel>
+                <Select
+                  labelId="exam-select-label"
+                  id="exam-select"
+                  value={selectedExamId}
+                  label="Select Exam to Manage"
+                  onChange={(e) => setSelectedExamId(e.target.value)}
+                  disabled={examsLoading || !exams?.length}
+                >
+                  {(exams || []).map((ex) => (
+                    <MenuItem key={ex._id} value={ex.examId}>
+                      {ex.examName} ({ex.examId})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <TextField
+                size="small"
+                label="Student Email to Enroll"
+                placeholder="student@demo.edu"
+                value={emailToEnroll}
+                onChange={(e) => setEmailToEnroll(e.target.value)}
+                sx={{ flexGrow: 1 }}
+              />
+
+              <Button
+                variant="contained"
+                startIcon={<PersonAddIcon />}
+                onClick={handleEnrollByEmail}
+                disabled={actionLoading || !emailToEnroll.trim() || !selectedExamId}
+                sx={{ whiteSpace: 'nowrap' }}
+              >
+                Enroll Student
+              </Button>
+            </Stack>
           </Paper>
 
-          {/* Loading */}
-          {isLoading && (
-            <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-              <CircularProgress />
-            </Box>
-          )}
-
-          {/* Error */}
-          {error && (
-            <Alert severity="error">
-              {error?.data?.message || error?.error || 'Failed to load pending users.'}
-            </Alert>
-          )}
-
-          {/* Empty state */}
-          {!isLoading && !error && filtered.length === 0 && (
-            <Box
-              display="flex"
-              flexDirection="column"
-              alignItems="center"
-              justifyContent="center"
-              py={6}
+          {/* Search Bar & Tabs */}
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={2}>
+            <Tabs
+              value={tabValue}
+              onChange={(e, val) => setTabValue(val)}
+              textColor="primary"
+              indicatorColor="primary"
             >
-              <CheckCircleIcon sx={{ fontSize: 64, color: 'success.main', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary">
-                No pending approval requests
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                All registered users have been reviewed.
-              </Typography>
-            </Box>
-          )}
+              <Tab
+                icon={<HowToRegIcon />}
+                iconPosition="start"
+                label={`Enrolled Students (${enrolledStudents.length})`}
+              />
+              <Tab
+                icon={<SchoolIcon />}
+                iconPosition="start"
+                label={`Available Students (${availableToEnroll.length})`}
+              />
+            </Tabs>
 
-          {/* Table */}
-          {!isLoading && !error && filtered.length > 0 && (
-            <TableContainer component={Paper}>
-              <Table>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: 'primary.main' }}>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>#</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>User</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Email</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Role</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Requested On</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }} align="center">
-                      Actions
-                    </TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filtered.map((user, idx) => (
-                    <TableRow
-                      key={user._id}
-                      hover
-                      sx={{
-                        '&:nth-of-type(odd)': { bgcolor: 'action.hover' },
-                      }}
-                    >
-                      <TableCell>{idx + 1}</TableCell>
-                      <TableCell>
-                        <Stack direction="row" alignItems="center" spacing={1.5}>
-                          <Avatar sx={{ bgcolor: 'primary.light', width: 36, height: 36 }}>
-                            {user.name?.[0]?.toUpperCase() || 'U'}
-                          </Avatar>
-                          <Typography fontWeight={500}>{user.name}</Typography>
-                        </Stack>
-                      </TableCell>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>
-                        <Chip
-                          icon={
-                            user.role === 'teacher' ? (
-                              <SchoolIcon fontSize="small" />
-                            ) : (
-                              <PersonIcon fontSize="small" />
-                            )
-                          }
-                          label={user.role.charAt(0).toUpperCase() + user.role.slice(1)}
-                          color={user.role === 'teacher' ? 'secondary' : 'primary'}
-                          size="small"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {user.createdAt
-                          ? new Date(user.createdAt).toLocaleDateString('en-IN', {
-                              day: '2-digit',
-                              month: 'short',
-                              year: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })
-                          : '—'}
-                      </TableCell>
-                      <TableCell align="center">
-                        <Stack direction="row" spacing={1} justifyContent="center">
-                          <Tooltip title="Approve this user">
-                            <span>
-                              <Button
-                                variant="contained"
-                                color="success"
-                                size="small"
-                                startIcon={<CheckCircleIcon />}
-                                onClick={() => handleApprove(user._id, user.email)}
-                                disabled={approving || rejecting}
-                                sx={{ textTransform: 'none' }}
-                              >
-                                Approve
-                              </Button>
-                            </span>
-                          </Tooltip>
-                          <Tooltip title="Reject and remove this registration">
-                            <span>
-                              <Button
-                                variant="outlined"
-                                color="error"
-                                size="small"
-                                startIcon={<CancelIcon />}
-                                onClick={() => handleReject(user._id, user.email)}
-                                disabled={approving || rejecting}
-                                sx={{ textTransform: 'none' }}
-                              >
-                                Reject
-                              </Button>
-                            </span>
-                          </Tooltip>
-                        </Stack>
-                      </TableCell>
+            <TextField
+              size="small"
+              placeholder="Search by name, email, roll number..."
+              value={studentFilter}
+              onChange={(e) => setStudentFilter(e.target.value)}
+              sx={{ minWidth: 280, mt: { xs: 2, sm: 0 } }}
+            />
+          </Stack>
+
+          {/* Tab 0: Enrolled Students */}
+          {tabValue === 0 && (
+            <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2 }}>
+              {loadingEnrollments ? (
+                <Box display="flex" justifyContent="center" py={6}>
+                  <CircularProgress />
+                </Box>
+              ) : filteredEnrolled.length === 0 ? (
+                <Box p={4} textAlign="center">
+                  <Typography variant="body1" color="text.secondary">
+                    No students currently enrolled in this exam.
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Switch to the "Available Students" tab or enter an email above to authorize students.
+                  </Typography>
+                </Box>
+              ) : (
+                <Table>
+                  <TableHead sx={{ backgroundColor: '#f1f5f9' }}>
+                    <TableRow>
+                      <TableCell><strong>Student</strong></TableCell>
+                      <TableCell><strong>Email</strong></TableCell>
+                      <TableCell><strong>Roll / Student ID</strong></TableCell>
+                      <TableCell><strong>Status</strong></TableCell>
+                      <TableCell><strong>Attempts</strong></TableCell>
+                      <TableCell align="right"><strong>Action</strong></TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {filteredEnrolled.map((row) => (
+                      <TableRow key={row._id} hover>
+                        <TableCell>
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Avatar sx={{ bgcolor: 'primary.light', color: 'primary.main', width: 32, height: 32 }}>
+                              {row.name ? row.name.charAt(0).toUpperCase() : 'S'}
+                            </Avatar>
+                            <Typography variant="subtitle2" fontWeight={600}>
+                              {row.name}
+                            </Typography>
+                          </Stack>
+                        </TableCell>
+                        <TableCell>{row.email}</TableCell>
+                        <TableCell>{row.studentIdNumber || '—'}</TableCell>
+                        <TableCell>
+                          <Chip
+                            icon={<CheckCircleIcon />}
+                            label={row.status || 'ENROLLED'}
+                            color="success"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {row.attemptsUsed || 0} / {row.attemptLimit || 1}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="Remove student from this exam">
+                            <IconButton
+                              color="error"
+                              size="small"
+                              disabled={actionLoading}
+                              onClick={() => handleUnenrollStudent(row.studentId, row.name)}
+                            >
+                              <DeleteOutlineIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </TableContainer>
           )}
 
-          {/* Pending count badge */}
-          {!isLoading && pendingUsers && pendingUsers.length > 0 && (
-            <Box mt={2} display="flex" justifyContent="flex-end">
-              <Chip
-                label={`${pendingUsers.length} pending approval${pendingUsers.length !== 1 ? 's' : ''}`}
-                color="warning"
-                variant="filled"
-              />
-            </Box>
+          {/* Tab 1: Available Platform Students */}
+          {tabValue === 1 && (
+            <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2 }}>
+              {loadingAllStudents ? (
+                <Box display="flex" justifyContent="center" py={6}>
+                  <CircularProgress />
+                </Box>
+              ) : availableToEnroll.length === 0 ? (
+                <Box p={4} textAlign="center">
+                  <Typography variant="body1" color="text.secondary">
+                    All registered platform students are already enrolled in this exam!
+                  </Typography>
+                </Box>
+              ) : (
+                <Table>
+                  <TableHead sx={{ backgroundColor: '#f1f5f9' }}>
+                    <TableRow>
+                      <TableCell><strong>Student</strong></TableCell>
+                      <TableCell><strong>Email</strong></TableCell>
+                      <TableCell><strong>Roll / Student ID</strong></TableCell>
+                      <TableCell><strong>Institution</strong></TableCell>
+                      <TableCell align="right"><strong>Enrollment Action</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {availableToEnroll.map((s) => (
+                      <TableRow key={s._id || s.id} hover>
+                        <TableCell>
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Avatar sx={{ bgcolor: 'secondary.light', color: 'secondary.main', width: 32, height: 32 }}>
+                              {s.name ? s.name.charAt(0).toUpperCase() : 'S'}
+                            </Avatar>
+                            <Typography variant="subtitle2" fontWeight={600}>
+                              {s.name}
+                            </Typography>
+                          </Stack>
+                        </TableCell>
+                        <TableCell>{s.email}</TableCell>
+                        <TableCell>{s.studentIdNumber || '—'}</TableCell>
+                        <TableCell>{s.institution || 'Engineering Institute'}</TableCell>
+                        <TableCell align="right">
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            startIcon={<PersonAddIcon />}
+                            disabled={actionLoading}
+                            onClick={() => handleEnrollStudent(s)}
+                          >
+                            Authorize
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </TableContainer>
           )}
         </Box>
       </DashboardCard>

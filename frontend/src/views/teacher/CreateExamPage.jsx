@@ -37,8 +37,12 @@ const CreateExamPage = () => {
 
   const initialExamValues = {
     examName: '',
+    examId: '',
+    examPassword: '',
+    subject: '',
+    passingMarks: '40',
     totalQuestions: '',
-    duration: '',
+    duration: '30',
     liveDate: '',
     deadDate: '',
     codingQuestion: {
@@ -49,8 +53,14 @@ const CreateExamPage = () => {
 
   const handleSubmit = async (values) => {
     try {
+      const examPayload = {
+        ...values,
+        userId: userInfo?._id || userInfo?.id,
+        email: userInfo?.email,
+        teacherId: userInfo?._id || userInfo?.id,
+      };
       // First create the exam
-      const examResponse = await createExam(values).unwrap();
+      const examResponse = await createExam(examPayload).unwrap();
       console.log('Exam Response:', examResponse);
 
       if (examResponse) {

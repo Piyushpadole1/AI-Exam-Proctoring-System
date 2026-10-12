@@ -27,9 +27,37 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
   const [isLastQuestion, setIsLastQuestion] = useState(false);
   const [isFinishTest, setisFinishTest] = useState(false);
 
+  const questionList = Array.isArray(questions) ? questions : [];
+
   useEffect(() => {
-    setIsLastQuestion(currentQuestion === questions.length - 1);
-  }, [currentQuestion, questions.length]);
+    setIsLastQuestion(currentQuestion === questionList.length - 1);
+  }, [currentQuestion, questionList.length]);
+
+  if (questionList.length === 0) {
+    return (
+      <Card sx={{ width: '85%', maxWidth: '500px', p: 4, textAlign: 'center', borderRadius: 2 }}>
+        <Typography variant="h5" gutterBottom fontWeight={700}>
+          No Multiple-Choice Questions
+        </Typography>
+        <Typography variant="body2" color="textSecondary" mb={3}>
+          This exam focuses on practical programming evaluation. You can now proceed to the Coding Environment.
+        </Typography>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={() => navigate(`/exam/${examId}/codedetails`)}
+          sx={{ fontWeight: 600 }}
+        >
+          Proceed to Coding Section
+        </Button>
+      </Card>
+    );
+  }
+
+  const currentQuestionData = questionList[currentQuestion];
+  if (!currentQuestionData) {
+    return null;
+  }
 
   const handleOptionChange = (event) => {
     setSelectedOption(event.target.value);
@@ -37,7 +65,6 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
 
   const handleNextQuestion = async () => {
     let isCorrect = false;
-    const currentQuestionData = questions[currentQuestion];
 
     if (currentQuestionData && currentQuestionData.options) {
       const correctOption = currentQuestionData.options.find((option) => option.isCorrect);
@@ -60,15 +87,11 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
 
     if (isLastQuestion) {
       try {
-        // Convert Map to object for API
         const answersObject = Object.fromEntries(answers);
-
-        // Add the current answer if it's the last question
         if (selectedOption) {
           answersObject[currentQuestionData._id] = selectedOption;
         }
 
-        // Send results to the backend
         await axiosInstance.post(
           '/api/users/results',
           {
@@ -88,7 +111,7 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
     }
 
     setSelectedOption(null);
-    if (currentQuestion < questions.length - 1) {
+    if (currentQuestion < questionList.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
     } else {
       setisFinishTest(true);
@@ -110,28 +133,29 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
           margin: '3px',
         }}
       >
-        <Typography s variant="h4" mb={3}>
+        <Typography variant="h4" mb={3}>
           Question {currentQuestion + 1}:
         </Typography>
         <Typography variant="body1" mb={3}>
-          {questions[currentQuestion].question}
+          {currentQuestionData.question}
         </Typography>
         <Box mb={10}>
           <FormControl component="fieldset">
             <RadioGroup
               aria-label="quiz"
               name="quiz"
-              value={selectedOption}
+              value={selectedOption || ''}
               onChange={handleOptionChange}
             >
-              {questions[currentQuestion].options.map((option) => (
-                <FormControlLabel
-                  key={option._id}
-                  value={option._id}
-                  control={<Radio />}
-                  label={option.optionText}
-                />
-              ))}
+              {Array.isArray(currentQuestionData.options) &&
+                currentQuestionData.options.map((option) => (
+                  <FormControlLabel
+                    key={option._id || option.id || option.optionText}
+                    value={option._id || option.id || option.optionText}
+                    control={<Radio />}
+                    label={option.optionText || option.text}
+                  />
+                ))}
             </RadioGroup>
           </FormControl>
         </Box>

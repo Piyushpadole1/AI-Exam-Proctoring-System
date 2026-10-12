@@ -16,95 +16,138 @@ import {
 import { uniqueId } from 'lodash';
 
 const Menuitems = [
+  // Student Items
   {
     navlabel: true,
-    subheader: 'Home',
+    subheader: 'Student Portal',
+    roles: ['student'],
   },
-
   {
     id: uniqueId(),
     title: 'Dashboard',
     icon: IconLayoutDashboard,
     href: '/dashboard',
-  },
-  {
-    navlabel: true,
-    subheader: 'Student',
+    roles: ['student'],
   },
   {
     id: uniqueId(),
     title: 'Exams',
     icon: IconTypography,
     href: '/exam',
+    roles: ['student'],
   },
   {
     id: uniqueId(),
-    title: 'Result',
+    title: 'My Results',
     icon: IconCopy,
     href: '/result',
+    roles: ['student'],
   },
+
+  // Teacher Items
   {
     navlabel: true,
-    subheader: 'Teacher',
+    subheader: 'Teacher Panel',
+    roles: ['teacher'],
+  },
+  {
+    id: uniqueId(),
+    title: 'Teacher Dashboard',
+    icon: IconDeviceDesktopAnalytics,
+    href: '/admin-dashboard',
+    roles: ['teacher'],
   },
   {
     id: uniqueId(),
     title: 'Create Exam',
     icon: IconMoodHappy,
     href: '/create-exam',
+    roles: ['teacher'],
   },
   {
     id: uniqueId(),
     title: 'Add Questions',
     icon: IconLogin,
     href: '/add-questions',
+    roles: ['teacher'],
   },
   {
     id: uniqueId(),
-    title: 'Exam Logs',
-    icon: IconUserPlus,
-    href: '/exam-log',
-  },
-  {
-    id: uniqueId(),
-    title: 'User Approvals',
+    title: 'Student Enrollment',
     icon: IconUserCheck,
     href: '/user-approvals',
-  },
-  {
-    navlabel: true,
-    subheader: 'Monitoring & Analytics',
+    roles: ['teacher'],
   },
   {
     id: uniqueId(),
-    title: 'Admin Dashboard',
-    icon: IconDeviceDesktopAnalytics,
-    href: '/admin-dashboard',
+    title: 'Exam Logs & Cheating',
+    icon: IconUserPlus,
+    href: '/exam-log',
+    roles: ['teacher'],
   },
   {
     id: uniqueId(),
     title: 'Live Monitoring',
     icon: IconEye,
     href: '/live-monitoring',
+    roles: ['teacher'],
   },
   {
     id: uniqueId(),
-    title: 'Analytics',
+    title: 'Exam Analytics',
     icon: IconChartBar,
     href: '/analytics',
+    roles: ['teacher'],
   },
-  // {
-  //   id: uniqueId(),
-  //   title: 'Exam  Sale comp',
-  //   icon: IconPlayerPlayFilled,
-  //   href: '/generate-report',
-  // },
-  // {
-  //   id: uniqueId(),
-  //   title: 'Sample Page',
-  //   icon: IconAperture,
-  //   href: '/sample-page',
-  // },
+  {
+    id: uniqueId(),
+    title: 'All Results',
+    icon: IconCopy,
+    href: '/result',
+    roles: ['teacher'],
+  },
+
+  // Admin Items
+  {
+    navlabel: true,
+    subheader: 'Admin Control',
+    roles: ['admin'],
+  },
+  {
+    id: uniqueId(),
+    title: 'Admin Dashboard',
+    icon: IconDeviceDesktopAnalytics,
+    href: '/admin-dashboard',
+    roles: ['admin'],
+  },
+  {
+    id: uniqueId(),
+    title: 'Enrollment & Users',
+    icon: IconUserCheck,
+    href: '/user-approvals',
+    roles: ['admin'],
+  },
+  {
+    id: uniqueId(),
+    title: 'System Exam Logs',
+    icon: IconUserPlus,
+    href: '/exam-log',
+    roles: ['admin'],
+  },
+  {
+    id: uniqueId(),
+    title: 'Live Monitoring',
+    icon: IconEye,
+    href: '/live-monitoring',
+    roles: ['admin'],
+  },
+  {
+    id: uniqueId(),
+    title: 'System Analytics',
+    icon: IconChartBar,
+    href: '/analytics',
+    roles: ['admin'],
+  },
 ];
 
 export default Menuitems;

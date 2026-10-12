@@ -77,9 +77,11 @@ const TestPage = () => {
     if (!examId || sessionId || !userInfo || !permissionsGranted) return;
 
     const initSession = async () => {
+      const storedPassword = sessionStorage.getItem(`exam_pwd_${examId}`);
       try {
         const res = await startSession({
           examId,
+          examPassword: storedPassword,
           deviceInfo: {
             userAgent: navigator.userAgent,
             platform: navigator.platform,
@@ -98,7 +100,8 @@ const TestPage = () => {
         }
       } catch (err) {
         console.error('Failed to start session:', err);
-        toast.error('Could not start exam session');
+        const msg = err?.data?.message || err?.data?.error || 'Could not start exam session. Access may be restricted.';
+        toast.error(msg);
       }
     };
 

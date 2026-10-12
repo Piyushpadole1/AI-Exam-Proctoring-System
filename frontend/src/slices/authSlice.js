@@ -9,16 +9,19 @@ const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
-    // set  userinfo in local storage
+    // set userinfo and token in local storage
     setCredentials: (state, action) => {
       state.userInfo = action.payload;
       localStorage.setItem('userInfo', JSON.stringify(action.payload));
+      if (action.payload && action.payload.token) {
+        localStorage.setItem('token', action.payload.token);
+      }
     },
-    // clear local storage it different from actual logout which send to backend
-    // it just clear credential form local storage it like frontend logout
+    // clear local storage
     logout: (state, action) => {
       state.userInfo = null;
       localStorage.removeItem('userInfo');
+      localStorage.removeItem('token');
     },
   },
 });

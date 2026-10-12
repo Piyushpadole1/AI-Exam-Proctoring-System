@@ -12,6 +12,7 @@ export const examApiSlice = apiSlice.injectEndpoints({
         url: `${EXAMS_URL}/exam`,
         method: 'GET',
       }),
+      providesTags: ['Exam'],
     }),
     // Create a new exam
     createExam: builder.mutation({
@@ -20,6 +21,7 @@ export const examApiSlice = apiSlice.injectEndpoints({
         method: 'POST',
         body: data,
       }),
+      invalidatesTags: ['Exam'],
     }),
     // Get questions for a specific exam
     getQuestions: builder.query({
@@ -27,6 +29,7 @@ export const examApiSlice = apiSlice.injectEndpoints({
         url: `${EXAMS_URL}/exam/questions/${examId}`,
         method: 'GET',
       }),
+      providesTags: ['Exam'],
     }),
     // Create a new question for an exam
     createQuestion: builder.mutation({
@@ -35,6 +38,7 @@ export const examApiSlice = apiSlice.injectEndpoints({
         method: 'POST',
         body: data,
       }),
+      invalidatesTags: ['Exam'],
     }),
 
     //Delete an exam
@@ -44,6 +48,7 @@ export const examApiSlice = apiSlice.injectEndpoints({
         method: 'POST',
         credentials: 'include',
       }),
+      invalidatesTags: ['Exam'],
     }),
   }),
 });
