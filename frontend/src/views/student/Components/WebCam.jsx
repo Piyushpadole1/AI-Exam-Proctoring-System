@@ -14,8 +14,8 @@ export default function WebCam({ onViolation, webcamRef }) {
     const now = Date.now();
     const lastTime = lastDetectionTime[type] || 0;
 
-    // Throttle events to avoid spamming
-    if (now - lastTime >= 3000) {
+    // Cooldown per violation type (5 seconds) to avoid duplicate spamming
+    if (now - lastTime >= 5000) {
       setLastDetectionTime((prev) => ({ ...prev, [type]: now }));
       
       const mappedType = type === 'noFace' ? 'NO_FACE_DETECTED' :
@@ -23,11 +23,22 @@ export default function WebCam({ onViolation, webcamRef }) {
                          type === 'cellPhone' ? 'CELL_PHONE_DETECTED' :
                          type === 'prohibitedObject' ? 'PROHIBITED_OBJECT' : type;
 
+      let screenshot = null;
+      try {
+        if (actualWebcamRef.current && typeof actualWebcamRef.current.getScreenshot === 'function') {
+          screenshot = actualWebcamRef.current.getScreenshot();
+        }
+      } catch (e) {
+        console.warn('Screenshot capture failed:', e);
+      }
+
       if (onViolation) {
         onViolation({
           eventType: mappedType,
           confidence: 1.0,
-          description: `${mappedType} detected by AI`,
+          description: `${mappedType.replace(/_/g, ' ')} detected by AI camera proctor`,
+          evidenceUrl: screenshot,
+          screenshot: screenshot,
         });
       }
     }
@@ -64,20 +75,27 @@ export default function WebCam({ onViolation, webcamRef }) {
         let faceDetected = false;
 
         obj.forEach((element) => {
-          const detectedClass = element.class;
-          console.log('Detected:', detectedClass);
+          const detectedClass = (element.class || '').toLowerCase();
 
-          if (detectedClass === 'cell phone') handleDetection('cellPhone');
-          if (detectedClass === 'book' || detectedClass === 'laptop')
+          if (detectedClass === 'cell phone' || detectedClass === 'mobile phone' || detectedClass === 'phone') {
+            console.log('Violating device detected:', detectedClass);
+            handleDetection('cellPhone');
+          }
+          if (detectedClass === 'book' || detectedClass === 'laptop') {
             handleDetection('prohibitedObject');
+          }
           if (detectedClass === 'person') {
             faceDetected = true;
             person_count++;
-            if (person_count > 1) handleDetection('multipleFace');
+            if (person_count > 1) {
+              handleDetection('multipleFace');
+            }
           }
         });
 
-        if (!faceDetected) handleDetection('noFace');
+        if (!faceDetected) {
+          handleDetection('noFace');
+        }
       } catch (error) {
         console.error('Error during detection:', error);
       }

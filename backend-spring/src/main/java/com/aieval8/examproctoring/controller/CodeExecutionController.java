@@ -58,7 +58,7 @@ public class CodeExecutionController {
         return ResponseEntity.ok(result.getOutput());
     }
 
-    @PostMapping(value = {"/api/coding/run", "/api/compile"})
+    @PostMapping(value = {"/api/compile", "/api/coding/execute-raw"})
     public ResponseEntity<Map<String, Object>> runCodeStructured(@RequestBody(required = false) Map<String, Object> body) {
         String code = extractCode(body);
         String language = body != null && body.containsKey("language") ? String.valueOf(body.get("language")) : "javascript";

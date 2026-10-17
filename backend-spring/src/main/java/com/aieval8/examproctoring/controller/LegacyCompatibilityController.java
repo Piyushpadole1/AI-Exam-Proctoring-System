@@ -45,10 +45,10 @@ public class LegacyCompatibilityController {
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> legacyRegister(@RequestBody Map<String, String> body) {
-        String role = body.getOrDefault("role", "student").toLowerCase();
+        String role = body.getOrDefault("role", "student").trim().toLowerCase();
         AuthResponse authResponse;
 
-        if ("teacher".equalsIgnoreCase(role)) {
+        if ("teacher".equals(role)) {
             TeacherRegisterRequest req = new TeacherRegisterRequest();
             req.setName(body.get("name"));
             req.setEmail(body.get("email"));
@@ -56,7 +56,7 @@ public class LegacyCompatibilityController {
             req.setPhone(body.get("phone"));
             req.setClientCode(body.get("clientCode"));
             authResponse = authService.registerTeacher(req);
-        } else {
+        } else if ("student".equals(role)) {
             StudentRegisterRequest req = new StudentRegisterRequest();
             req.setName(body.get("name"));
             req.setEmail(body.get("email"));
@@ -65,6 +65,10 @@ public class LegacyCompatibilityController {
             req.setClientCode(body.get("clientCode"));
             req.setStudentIdNumber(body.get("studentId"));
             authResponse = authService.registerStudent(req);
+        } else {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "message", "Invalid role specified. Only Teacher and Student accounts are permitted."
+            ));
         }
 
         Map<String, Object> response = new HashMap<>();

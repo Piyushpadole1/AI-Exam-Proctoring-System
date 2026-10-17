@@ -103,12 +103,55 @@ public class CodeExecutionService {
         }
     }
 
+    public static class SecurityCheckResult {
+        public final boolean isSafe;
+        public final String reason;
+        public SecurityCheckResult(boolean isSafe, String reason) {
+            this.isSafe = isSafe;
+            this.reason = reason;
+        }
+    }
+
+    public SecurityCheckResult checkSecurity(String code, String language) {
+        if (code == null) return new SecurityCheckResult(true, null);
+        String lower = code.toLowerCase();
+        String lang = language != null ? language.toLowerCase().trim() : "javascript";
+
+        if (lang.contains("python") || lang.equals("py")) {
+            if (lower.matches("(?s).*\\b(import\\s+(os|sys|subprocess|shutil|socket|requests|urllib|pty)|from\\s+(os|sys|subprocess|shutil|socket|requests|urllib)\\s+import).*")) {
+                return new SecurityCheckResult(false, "Restricted module import detected (os, sys, subprocess, socket, network).");
+            }
+            if (lower.contains("__import__") || lower.contains("eval(") || lower.contains("exec(") || lower.contains("open(")) {
+                return new SecurityCheckResult(false, "Restricted function call detected (eval, exec, open, __import__).");
+            }
+        } else if (lang.contains("java")) {
+            if (lower.contains("runtime.getruntime") || lower.contains("processbuilder") || lower.contains("system.exit") || lower.contains("java.io.file") || lower.contains("java.net.") || lower.contains("java.lang.reflect")) {
+                return new SecurityCheckResult(false, "Restricted class/method call detected (Runtime, ProcessBuilder, System.exit, File, Network, Reflection).");
+            }
+        } else if (lang.contains("javascript") || lang.contains("node") || lang.equals("js")) {
+            if (lower.contains("child_process") || lower.contains("require('fs')") || lower.contains("require(\"fs\")") || lower.contains("require('net')") || lower.contains("require('http')") || lower.contains("process.exit") || lower.contains("process.env")) {
+                return new SecurityCheckResult(false, "Restricted Node.js module access detected (child_process, fs, net, http, process).");
+            }
+        } else if (lang.contains("c") || lang.contains("cpp")) {
+            if (lower.contains("system(") || lower.contains("popen(") || lower.contains("fork(") || lower.contains("exec(") || lower.contains("<windows.h>") || lower.contains("<unistd.h>") || lower.contains("<sys/socket.h>") || lower.contains("fopen(")) {
+                return new SecurityCheckResult(false, "Restricted system call or header detected (system, fork, exec, socket, file IO).");
+            }
+        }
+        return new SecurityCheckResult(true, null);
+    }
+
     public ExecutionResult execute(String code, String language, String input) {
         if (code == null || code.trim().isEmpty()) {
             return new ExecutionResult(false, "No code provided to execute.", "Empty code", -1, 0L);
         }
 
         String lang = language == null ? "javascript" : language.trim().toLowerCase();
+
+        SecurityCheckResult sec = checkSecurity(code, lang);
+        if (!sec.isSafe) {
+            return new ExecutionResult(false, "Security Restriction: " + sec.reason, sec.reason, -1, 0L);
+        }
+
         return switch (lang) {
             case "python", "py" -> executePython(code, input);
             case "java" -> executeJava(code, input);

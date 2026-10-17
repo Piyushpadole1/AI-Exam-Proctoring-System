@@ -57,6 +57,13 @@ export const proctoringApiSlice = apiSlice.injectEndpoints({
       }),
       pollingInterval: 10000, // Refresh every 10 seconds
     }),
+    // Admin exam logs & violation stream
+    getAdminLogs: builder.query({
+      query: (examId) => ({
+        url: `${ADMIN_URL}/logs${examId ? `?examId=${examId}` : ''}`,
+        method: 'GET',
+      }),
+    }),
   }),
 });
 
@@ -68,4 +75,5 @@ export const {
   useGetDashboardStatsQuery,
   useGetAnalyticsQuery,
   useGetActiveMonitoringQuery,
+  useGetAdminLogsQuery,
 } = proctoringApiSlice;

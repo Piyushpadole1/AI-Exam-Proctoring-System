@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/student")
+@RequestMapping({"/api/student", "/api/students"})
 @PreAuthorize("hasRole('STUDENT')")
 public class StudentController {
 
@@ -67,7 +67,7 @@ public class StudentController {
             HttpServletRequest servletRequest,
             @AuthenticationPrincipal CustomUserDetails studentDetails) {
         String deviceInfo = servletRequest.getHeader("User-Agent");
-        String password = (body != null) ? body.get("password") : null;
+        String password = (body != null) ? (body.get("password") != null ? body.get("password") : body.get("examPassword")) : null;
         AttemptResponse response = attemptService.startOrResumeAttempt(examCode, password, deviceInfo, resolveStudent(studentDetails));
         return ResponseEntity.ok(response);
     }

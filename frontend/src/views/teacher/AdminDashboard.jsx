@@ -25,6 +25,11 @@ import {
   Error as DangerIcon,
   TrendingUp as TrendIcon,
   Visibility as ActiveIcon,
+  School as EnrolledIcon,
+  FactCheck as SubmissionIcon,
+  Assessment as ScoreIcon,
+  Percent as PassRateIcon,
+  Flag as FlagIcon,
 } from '@mui/icons-material';
 import PageContainer from 'src/components/container/PageContainer';
 import DashboardCard from '../../components/shared/DashboardCard';
@@ -81,7 +86,7 @@ const getClassificationChip = (classification) => {
 
 const AdminDashboard = () => {
   const { data, isLoading, error } = useGetDashboardStatsQuery(undefined, {
-    pollingInterval: 30000,
+    pollingInterval: 3000, // Real-time 3s short polling
   });
 
   if (isLoading) {
@@ -102,52 +107,88 @@ const AdminDashboard = () => {
   const recentSessions = data?.recentSessions || [];
 
   return (
-    <PageContainer title="Admin Dashboard" description="AI_Evalu8 Admin Dashboard">
+    <PageContainer title="Teacher Dashboard" description="AI_Evalu8 Teacher Proctoring Dashboard">
       <Box>
         <Typography variant="h4" mb={3} fontWeight="bold">
-          📊 Admin Dashboard
+          📊 Teacher Dashboard
         </Typography>
 
-        {/* Stats Cards */}
+        {/* Primary Exam & Student Stats */}
         <Grid container spacing={3} mb={3}>
           <Grid item xs={12} sm={6} md={3}>
             <StatCard
-              title="Total Students"
-              value={stats.totalStudents || 0}
-              icon={<PeopleIcon sx={{ color: 'primary.main' }} />}
+              title="Total Exams"
+              value={stats.totalExams || 0}
+              icon={<ExamIcon sx={{ color: 'primary.main' }} />}
               color="primary"
             />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <StatCard
-              title="Total Exams"
-              value={stats.totalExams || 0}
-              icon={<ExamIcon sx={{ color: 'info.main' }} />}
-              color="info"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <StatCard
-              title="Active Sessions"
-              value={stats.activeSessions || 0}
+              title="Active Exams"
+              value={stats.activeExams || 0}
               icon={<ActiveIcon sx={{ color: 'success.main' }} />}
               color="success"
             />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <StatCard
+              title="Enrolled Students"
+              value={stats.enrolledStudents || stats.totalStudents || 0}
+              icon={<EnrolledIcon sx={{ color: 'info.main' }} />}
+              color="info"
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <StatCard
+              title="Students Taking Exam"
+              value={stats.studentsCurrentlyTakingExams ?? stats.activeSessions ?? 0}
+              icon={<PeopleIcon sx={{ color: 'warning.main' }} />}
+              color="warning"
+            />
+          </Grid>
+        </Grid>
+
+        {/* Performance & Academic Metrics */}
+        <Grid container spacing={3} mb={3}>
+          <Grid item xs={12} sm={6} md={3}>
+            <StatCard
+              title="Total Submissions"
+              value={stats.submissions ?? stats.totalSessions ?? 0}
+              icon={<SubmissionIcon sx={{ color: 'info.main' }} />}
+              color="info"
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <StatCard
+              title="Average Score"
+              value={`${stats.averageScore ?? 0}%`}
+              icon={<ScoreIcon sx={{ color: 'primary.main' }} />}
+              color="primary"
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <StatCard
+              title="Pass Rate"
+              value={`${stats.passRate ?? 0}%`}
+              icon={<PassRateIcon sx={{ color: 'success.main' }} />}
+              color="success"
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <StatCard
               title="Avg Fairness Score"
-              value={stats.avgFairnessScore || 100}
+              value={`${stats.avgFairnessScore ?? stats.averageIntegrity ?? 100}%`}
               icon={<SecurityIcon sx={{ color: 'warning.main' }} />}
               color="warning"
             />
           </Grid>
         </Grid>
 
-        {/* Classification Distribution */}
+        {/* Proctoring & Integrity Classification Distribution */}
         <Grid container spacing={3} mb={3}>
-          <Grid item xs={12} sm={4}>
-            <Card sx={{ bgcolor: '#e8f5e9' }}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ bgcolor: '#e8f5e9', height: '100%' }}>
               <CardContent>
                 <Typography variant="subtitle2" color="textSecondary">
                   Safe Sessions
@@ -158,8 +199,8 @@ const AdminDashboard = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={4}>
-            <Card sx={{ bgcolor: '#fff3e0' }}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ bgcolor: '#fff3e0', height: '100%' }}>
               <CardContent>
                 <Typography variant="subtitle2" color="textSecondary">
                   Warning Sessions
@@ -170,8 +211,8 @@ const AdminDashboard = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={4}>
-            <Card sx={{ bgcolor: '#ffebee' }}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ bgcolor: '#ffebee', height: '100%' }}>
               <CardContent>
                 <Typography variant="subtitle2" color="textSecondary">
                   Malpractice Cases
@@ -182,29 +223,33 @@ const AdminDashboard = () => {
               </CardContent>
             </Card>
           </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ bgcolor: '#fce4ec', height: '100%' }}>
+              <CardContent>
+                <Typography variant="subtitle2" color="textSecondary">
+                  Flagged / Terminated
+                </Typography>
+                <Typography variant="h3" color="error.dark" fontWeight="bold">
+                  {stats.flaggedCount ?? stats.terminatedSessions ?? 0}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
 
-        {/* More Stats */}
+        {/* Violation & Risk Overview */}
         <Grid container spacing={3} mb={3}>
-          <Grid item xs={12} sm={4}>
+          <Grid item xs={12} sm={6}>
             <StatCard
-              title="Total Sessions"
-              value={stats.totalSessions || 0}
-              icon={<TrendIcon sx={{ color: 'info.main' }} />}
-              color="info"
-            />
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <StatCard
-              title="Total Violations"
+              title="Total Proctoring Violations"
               value={stats.totalViolations || 0}
               icon={<WarningIcon sx={{ color: 'error.main' }} />}
               color="error"
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid item xs={12} sm={6}>
             <StatCard
-              title="Terminated Sessions"
+              title="Terminated / Disqualified"
               value={stats.terminatedSessions || 0}
               icon={<DangerIcon sx={{ color: 'error.main' }} />}
               color="error"

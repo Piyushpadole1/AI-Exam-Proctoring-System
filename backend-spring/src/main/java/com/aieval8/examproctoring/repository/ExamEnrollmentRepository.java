@@ -12,6 +12,7 @@ import java.util.Optional;
 public interface ExamEnrollmentRepository extends JpaRepository<ExamEnrollment, Long> {
     Optional<ExamEnrollment> findByExamIdAndStudentId(Long examId, Long studentId);
     List<ExamEnrollment> findByExamId(Long examId);
+    List<ExamEnrollment> findByExamIdAndStatus(Long examId, EnrollmentStatus status);
     List<ExamEnrollment> findByStudentId(Long studentId);
     List<ExamEnrollment> findByStudentIdAndStatus(Long studentId, EnrollmentStatus status);
     boolean existsByExamIdAndStudentIdAndStatus(Long examId, Long studentId, EnrollmentStatus status);

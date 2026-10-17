@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -15,11 +15,16 @@ import {
   Card,
   CardContent,
   Grid,
+  Snackbar,
+  Stack,
+  Button,
 } from '@mui/material';
 import {
   Visibility as ActiveIcon,
   Timer as TimerIcon,
   Warning as WarningIcon,
+  NotificationsActive as AlertIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import PageContainer from 'src/components/container/PageContainer';
 import DashboardCard from '../../components/shared/DashboardCard';
@@ -31,10 +36,53 @@ const formatTime = (seconds) => {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
+const getStatusBadge = (status) => {
+  switch (status?.toLowerCase()) {
+    case 'active':
+      return <Chip label="ACTIVE" color="success" size="small" sx={{ fontWeight: 'bold' }} />;
+    case 'flagged':
+      return <Chip label="FLAGGED" color="warning" size="small" sx={{ fontWeight: 'bold' }} />;
+    case 'terminated':
+      return <Chip label="TERMINATED" color="error" size="small" sx={{ fontWeight: 'bold' }} />;
+    case 'submitted':
+      return <Chip label="SUBMITTED" color="info" size="small" sx={{ fontWeight: 'bold' }} />;
+    default:
+      return <Chip label={status || 'IN_PROGRESS'} size="small" />;
+  }
+};
+
 const LiveMonitoringPage = () => {
-  const { data: sessions, isLoading, error } = useGetActiveMonitoringQuery(undefined, {
-    pollingInterval: 5000,
+  const { data: sessions, isLoading, error, refetch } = useGetActiveMonitoringQuery(undefined, {
+    pollingInterval: 3000, // 3-second live refresh
   });
+
+  const [liveAlert, setLiveAlert] = useState(null);
+  const previousViolationsMap = useRef({});
+
+  const activeSessions = sessions || [];
+
+  // Detect newly triggered violations across polling cycles for instant alerts
+  useEffect(() => {
+    if (!activeSessions || activeSessions.length === 0) return;
+
+    activeSessions.forEach((session) => {
+      const studentEmail = session.studentId?.email || session.studentEmail || session._id;
+      const prevCount = previousViolationsMap.current[studentEmail];
+      const currentCount = session.totalViolations || 0;
+
+      if (prevCount !== undefined && currentCount > prevCount) {
+        // Trigger live alert
+        const studentName = session.studentId?.name || session.studentName || 'Student';
+        const eventName = session.latestViolation?.eventType?.replace(/_/g, ' ') || 'Malpractice Violation';
+        setLiveAlert({
+          message: `🚨 Malpractice Alert: ${studentName} triggered "${eventName}" in exam ${session.examName || session.examCode}`,
+          severity: 'error',
+        });
+      }
+
+      previousViolationsMap.current[studentEmail] = currentCount;
+    });
+  }, [activeSessions]);
 
   if (isLoading) {
     return (
@@ -45,50 +93,88 @@ const LiveMonitoringPage = () => {
   }
 
   if (error) {
-    return <Alert severity="error">Failed to load monitoring data</Alert>;
+    return <Alert severity="error">Failed to load monitoring data: {error?.data?.message || 'Access Denied'}</Alert>;
   }
-
-  const activeSessions = sessions || [];
 
   return (
     <PageContainer title="Live Monitoring" description="Monitor active exam sessions in real-time">
-      <Box>
-        <Typography variant="h4" mb={3} fontWeight="bold">
-          🔴 Live Monitoring
-        </Typography>
+      <Box p={2}>
+        {/* Header */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" mb={3} gap={2}>
+          <div>
+            <Typography variant="h3" fontWeight="bold">
+              🔴 Real-Time Live Monitoring
+            </Typography>
+            <Typography variant="subtitle2" color="textSecondary">
+              Live streaming updates of students taking your exams. Updates automatically every 3 seconds.
+            </Typography>
+          </div>
+          <Button variant="outlined" startIcon={<RefreshIcon />} onClick={refetch}>
+            Refresh Now
+          </Button>
+        </Box>
 
-        {/* Summary */}
+        {/* Live Alert Banner */}
+        {liveAlert && (
+          <Alert
+            severity={liveAlert.severity}
+            icon={<AlertIcon />}
+            sx={{ mb: 3, fontWeight: 'bold' }}
+            onClose={() => setLiveAlert(null)}
+          >
+            {liveAlert.message}
+          </Alert>
+        )}
+
+        {/* Summary Metrics */}
         <Grid container spacing={3} mb={3}>
           <Grid item xs={12} sm={4}>
-            <Card>
+            <Card elevation={2}>
               <CardContent>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <ActiveIcon color="success" />
-                  <Typography variant="h6">
-                    {activeSessions.length} Active Session{activeSessions.length !== 1 ? 's' : ''}
-                  </Typography>
+                <Box display="flex" alignItems="center" gap={1.5}>
+                  <ActiveIcon color="success" sx={{ fontSize: 32 }} />
+                  <div>
+                    <Typography variant="h4" fontWeight="bold">
+                      {activeSessions.length}
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Monitored Students
+                    </Typography>
+                  </div>
                 </Box>
               </CardContent>
             </Card>
           </Grid>
           <Grid item xs={12} sm={4}>
-            <Card>
+            <Card elevation={2}>
               <CardContent>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <WarningIcon color="warning" />
-                  <Typography variant="h6">
-                    {activeSessions.filter((s) => s.totalViolations > 0).length} With Violations
-                  </Typography>
+                <Box display="flex" alignItems="center" gap={1.5}>
+                  <WarningIcon color="warning" sx={{ fontSize: 32 }} />
+                  <div>
+                    <Typography variant="h4" fontWeight="bold">
+                      {activeSessions.filter((s) => s.totalViolations > 0).length}
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Flagged with Violations
+                    </Typography>
+                  </div>
                 </Box>
               </CardContent>
             </Card>
           </Grid>
           <Grid item xs={12} sm={4}>
-            <Card>
+            <Card elevation={2}>
               <CardContent>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <TimerIcon color="info" />
-                  <Typography variant="h6">Auto-refreshing every 5s</Typography>
+                <Box display="flex" alignItems="center" gap={1.5}>
+                  <TimerIcon color="info" sx={{ fontSize: 32 }} />
+                  <div>
+                    <Typography variant="h4" fontWeight="bold">
+                      Real-Time
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Auto-Polling (3s Interval)
+                    </Typography>
+                  </div>
                 </Box>
               </CardContent>
             </Card>
@@ -96,29 +182,30 @@ const LiveMonitoringPage = () => {
         </Grid>
 
         {/* Active Sessions Table */}
-        <DashboardCard title="Active Exam Sessions">
+        <DashboardCard title="Active & Recent Exam Sessions">
           {activeSessions.length === 0 ? (
             <Box py={6} textAlign="center">
               <ActiveIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
               <Typography variant="h6" color="textSecondary">
-                No active exam sessions
+                No active exam sessions currently
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                Sessions will appear here when students start their exams.
+                Active students taking your exams will appear here immediately in real time.
               </Typography>
             </Box>
           ) : (
-            <TableContainer component={Paper}>
+            <TableContainer component={Paper} elevation={1}>
               <Table>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: 'primary.main' }}>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Student</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Exam</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Time Left</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Violations</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Fairness</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Classification</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>Last Event</TableCell>
+                <TableHead sx={{ bgcolor: 'grey.100' }}>
+                  <TableRow>
+                    <TableCell><strong>Student</strong></TableCell>
+                    <TableCell><strong>Exam</strong></TableCell>
+                    <TableCell align="center"><strong>Status</strong></TableCell>
+                    <TableCell align="center"><strong>Time Left</strong></TableCell>
+                    <TableCell align="center"><strong>Violations</strong></TableCell>
+                    <TableCell align="center"><strong>Fairness Score</strong></TableCell>
+                    <TableCell align="center"><strong>Classification</strong></TableCell>
+                    <TableCell align="center"><strong>Latest Event</strong></TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -128,23 +215,31 @@ const LiveMonitoringPage = () => {
                       hover
                       sx={{
                         bgcolor:
-                          session.classification === 'MALPRACTICE'
+                          session.status === 'terminated'
                             ? '#ffebee'
-                            : session.classification === 'WARNING'
-                              ? '#fff3e0'
-                              : 'inherit',
+                            : session.status === 'flagged'
+                            ? '#fff8e1'
+                            : 'inherit',
                       }}
                     >
                       <TableCell>
-                        <Typography fontWeight="500">
-                          {session.studentId?.name || 'Unknown'}
+                        <Typography fontWeight="600">
+                          {session.studentId?.name || session.studentName || 'Student'}
                         </Typography>
                         <Typography variant="caption" color="textSecondary">
-                          {session.studentId?.email}
+                          {session.studentId?.email || session.studentEmail}
                         </Typography>
                       </TableCell>
-                      <TableCell>{session.examName}</TableCell>
                       <TableCell>
+                        <Typography variant="body2" fontWeight="500">
+                          {session.examName}
+                        </Typography>
+                        <Chip label={session.examCode} size="small" variant="outlined" />
+                      </TableCell>
+                      <TableCell align="center">
+                        {getStatusBadge(session.status)}
+                      </TableCell>
+                      <TableCell align="center">
                         <Chip
                           icon={<TimerIcon />}
                           label={formatTime(session.timeLeftSeconds || 0)}
@@ -152,50 +247,49 @@ const LiveMonitoringPage = () => {
                           size="small"
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell align="center">
                         <Chip
-                          label={session.totalViolations || 0}
+                          label={`${session.totalViolations || 0} / 6`}
                           color={
-                            session.totalViolations > 5
+                            session.totalViolations >= 6
                               ? 'error'
                               : session.totalViolations > 0
-                                ? 'warning'
-                                : 'success'
+                              ? 'warning'
+                              : 'success'
                           }
                           size="small"
+                          sx={{ fontWeight: 'bold' }}
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell align="center">
                         <Typography
                           fontWeight="bold"
                           color={
                             session.fairnessScore >= 70
                               ? 'success.main'
-                              : session.fairnessScore >= 30
-                                ? 'warning.main'
-                                : 'error.main'
+                              : session.fairnessScore >= 40
+                              ? 'warning.main'
+                              : 'error.main'
                           }
                         >
                           {session.fairnessScore}/100
                         </Typography>
                       </TableCell>
-                      <TableCell>
+                      <TableCell align="center">
                         <Chip
-                          label={session.classification || 'PENDING'}
+                          label={session.classification || 'SAFE'}
                           color={
                             session.classification === 'SAFE'
                               ? 'success'
                               : session.classification === 'WARNING'
-                                ? 'warning'
-                                : session.classification === 'MALPRACTICE'
-                                  ? 'error'
-                                  : 'default'
+                              ? 'warning'
+                              : 'error'
                           }
                           size="small"
                           variant="outlined"
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell align="center">
                         {session.latestViolation ? (
                           <Box>
                             <Chip
@@ -211,7 +305,7 @@ const LiveMonitoringPage = () => {
                           </Box>
                         ) : (
                           <Typography variant="caption" color="textSecondary">
-                            None
+                            {session.lastEvent || 'Monitoring Active'}
                           </Typography>
                         )}
                       </TableCell>

@@ -91,6 +91,11 @@ public class AuthService {
         ));
     }
 
+    @Transactional
+    public AuthResponse registerAdmin(TeacherRegisterRequest request) {
+        throw new IllegalArgumentException("Admin registration is disabled. Only Teacher and Student accounts are permitted.");
+    }
+
     public AuthResponse login(LoginRequest request) {
         String email = request.getEmail().trim().toLowerCase();
         User user = userRepository.findByEmail(email)

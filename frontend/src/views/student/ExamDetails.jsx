@@ -67,7 +67,30 @@ const DescriptionAndInstructions = () => {
   const mcqCount = questions?.length ?? 0;
   const hasCodingQuestion = Boolean(codingQuestion);
   const hasConfiguredQuestions = mcqCount > 0 || hasCodingQuestion;
-  const isEnrolled = isTeacher || Boolean(exam?.isEnrolled);
+  const [requestingEnrollment, setRequestingEnrollment] = useState(false);
+  const [localStatus, setLocalStatus] = useState(null);
+
+  useEffect(() => {
+    if (exam) {
+      setLocalStatus(exam.enrollmentStatus || (exam.isEnrolled ? 'ENROLLED' : 'NOT_ENROLLED'));
+    }
+  }, [exam]);
+
+  const handleRequestEnrollment = async () => {
+    try {
+      setRequestingEnrollment(true);
+      const res = await axiosInstance.post(`/api/users/exam/${examId}/request-enrollment`, {}, { withCredentials: true });
+      toast.success(res.data?.message || 'Enrollment request submitted! Waiting for teacher approval.');
+      setLocalStatus('PENDING');
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Failed to submit enrollment request.');
+    } finally {
+      setRequestingEnrollment(false);
+    }
+  };
+
+  const currentStatus = localStatus || exam?.enrollmentStatus || (exam?.isEnrolled ? 'ENROLLED' : 'NOT_ENROLLED');
+  const isEnrolled = isTeacher || currentStatus === 'ENROLLED' || Boolean(exam?.isEnrolled);
 
   const handleOpenPasswordModal = () => {
     if (!exam) {
@@ -228,15 +251,36 @@ const DescriptionAndInstructions = () => {
           </Box>
         )}
 
-        {!isTeacher && !isEnrolled ? (
+        {!isTeacher && currentStatus === 'PENDING' ? (
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            <strong>Enrollment Pending:</strong> Your request to take this exam has been submitted and is currently pending approval by the instructor. You will be able to start once approved.
+          </Alert>
+        ) : !isTeacher && currentStatus === 'REJECTED' ? (
           <Alert severity="error" sx={{ mb: 3 }}>
-            <strong>Enrollment Required:</strong> You are not enrolled in this exam. Only students
-            explicitly authorized by the instructor may participate. Exam credentials alone do not grant access.
+            <strong>Enrollment Rejected:</strong> Your request to take this exam has been rejected by the instructor.
+          </Alert>
+        ) : !isTeacher && !isEnrolled ? (
+          <Alert
+            severity="warning"
+            sx={{ mb: 3 }}
+            action={
+              <Button
+                color="warning"
+                variant="contained"
+                size="small"
+                onClick={handleRequestEnrollment}
+                disabled={requestingEnrollment}
+                sx={{ fontWeight: 700 }}
+              >
+                {requestingEnrollment ? 'Submitting...' : 'Request Enrollment'}
+              </Button>
+            }
+          >
+            <strong>Enrollment Required:</strong> You are not enrolled in this exam. Only students approved by the instructor can participate. Click "Request Enrollment" to ask for teacher authorization.
           </Alert>
         ) : (
-          <Alert severity="info" sx={{ mb: 3 }}>
-            <strong>Enrollment Verified:</strong> You are authorized to take this examination.
-            Ensure you enter the exam password provided by your teacher.
+          <Alert severity="success" sx={{ mb: 3 }}>
+            <strong>Enrollment Verified:</strong> You are authorized to take this examination. Ensure you enter the exam password provided by your teacher.
           </Alert>
         )}
 

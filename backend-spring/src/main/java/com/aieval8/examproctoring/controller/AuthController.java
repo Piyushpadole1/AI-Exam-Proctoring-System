@@ -28,6 +28,13 @@ public class AuthController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
+    @PostMapping("/register/admin")
+    public ResponseEntity<?> registerAdmin(@Valid @RequestBody TeacherRegisterRequest request) {
+        return ResponseEntity.badRequest().body(java.util.Map.of(
+            "message", "Admin registration is disabled. Only Teacher and Student accounts are permitted."
+        ));
+    }
+
     @PostMapping("/register/student")
     public ResponseEntity<AuthResponse> registerStudent(@Valid @RequestBody StudentRegisterRequest request) {
         AuthResponse response = authService.registerStudent(request);

@@ -42,3 +42,11 @@ coverage/
 # Java / Maven build output
 target/
 *.class
+
+# Spring Boot configuration
+**/application.properties
+**/application-local.properties
+**/application-dev.properties
+
+# Database backups
+backup/

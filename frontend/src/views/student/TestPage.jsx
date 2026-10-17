@@ -7,7 +7,7 @@ import MultipleChoiceQuestion from './Components/MultipleChoiceQuestion';
 import NumberOfQuestions from './Components/NumberOfQuestions';
 import ProctoringManager from './Components/ProctoringManager';
 import { useGetExamsQuery, useGetQuestionsQuery } from '../../slices/examApiSlice';
-import { useStartSessionMutation, useSubmitSessionMutation } from 'src/slices/sessionApiSlice';
+import { useStartSessionMutation, useSubmitSessionMutation, useTerminateSessionMutation } from 'src/slices/sessionApiSlice';
 import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 
@@ -20,6 +20,7 @@ const TestPage = () => {
   
   const [startSession] = useStartSessionMutation();
   const [submitSessionMutation] = useSubmitSessionMutation();
+  const [terminateSessionMutation] = useTerminateSessionMutation();
   
   const [sessionId, setSessionId] = useState(null);
   const [isExamActive, setIsExamActive] = useState(false);
@@ -124,14 +125,14 @@ const TestPage = () => {
     handleTestSubmission();
   };
 
-  const handleTestSubmission = async () => {
+  const handleTestSubmission = async (answers = {}) => {
     if (isSubmitting || !sessionId) return; // Prevent multiple submissions
 
     try {
       setIsSubmitting(true);
       setIsExamActive(false);
 
-      const result = await submitSessionMutation({ sessionId, answers: {} }).unwrap();
+      const result = await submitSessionMutation({ sessionId, answers }).unwrap();
       console.log('Session submitted:', result);
 
       toast.success('Test submitted successfully!');
@@ -146,9 +147,17 @@ const TestPage = () => {
     }
   };
   
-  const handleTerminate = (reason) => {
-    toast.error(reason);
+  const handleTerminate = async (reason) => {
+    const finalReason = reason || 'Exam terminated: Malpractice threshold exceeded (6 violations reached).';
+    toast.error(finalReason);
     setIsExamActive(false);
+    try {
+      if (sessionId) {
+        await terminateSessionMutation({ sessionId, reason: finalReason }).unwrap();
+      }
+    } catch (e) {
+      console.warn('Error recording termination:', e);
+    }
     navigate(`/exam/${examId}/report/${sessionId}`);
   };
 

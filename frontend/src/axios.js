@@ -1,7 +1,6 @@
 import axios from 'axios';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
-console.log(API_URL);
 
 const axiosInstance = axios.create({
   baseURL: API_URL,
@@ -27,5 +26,16 @@ axiosInstance.interceptors.request.use((config) => {
 }, (error) => {
   return Promise.reject(error);
 });
+
+axiosInstance.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userInfo');
+    }
+    return Promise.reject(error);
+  }
+);
 
 export default axiosInstance;

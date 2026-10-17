@@ -24,19 +24,22 @@ public class AdminController {
     private final CheatingLogEntryRepository cheatingLogRepository;
     private final ProctoringSessionRepository sessionRepository;
     private final ProctoringEventRepository eventRepository;
+    private final ExamEnrollmentRepository enrollmentRepository;
 
     public AdminController(ExamRepository examRepository,
                            ExamAttemptRepository attemptRepository,
                            UserRepository userRepository,
                            CheatingLogEntryRepository cheatingLogRepository,
                            ProctoringSessionRepository sessionRepository,
-                           ProctoringEventRepository eventRepository) {
+                           ProctoringEventRepository eventRepository,
+                           ExamEnrollmentRepository enrollmentRepository) {
         this.examRepository = examRepository;
         this.attemptRepository = attemptRepository;
         this.userRepository = userRepository;
         this.cheatingLogRepository = cheatingLogRepository;
         this.sessionRepository = sessionRepository;
         this.eventRepository = eventRepository;
+        this.enrollmentRepository = enrollmentRepository;
     }
 
     /**
@@ -132,18 +135,77 @@ public class AdminController {
                 .filter(a -> a.getIntegrityScore() != null && a.getIntegrityScore() >= 65 && a.getIntegrityScore() < 90)
                 .count();
 
+        // Enrolled students count from enrollments
+        long enrolledStudentsCount = allowedExamIds.isEmpty() ? 0 :
+                enrollmentRepository.findAll().stream()
+                        .filter(en -> en.getExam() != null && allowedExamIds.contains(en.getExam().getId()) && en.getStatus() == EnrollmentStatus.ENROLLED)
+                        .map(en -> en.getStudent() != null ? en.getStudent().getId() : null)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .count();
+
+        // Active exams
+        LocalDateTime now = LocalDateTime.now();
+        long activeExamsCount = exams.stream()
+                .filter(e -> (e.getStartTime() == null || !now.isBefore(e.getStartTime())) &&
+                             (e.getEndTime() == null || !now.isAfter(e.getEndTime())))
+                .count();
+
+        // Submissions & Average Score & Pass Rate
+        long submissionsCount = allAttempts.stream()
+                .filter(a -> a.getStatus() == AttemptStatus.SUBMITTED || a.getStatus() == AttemptStatus.COMPLETED)
+                .count();
+
+        double avgScore = allAttempts.stream()
+                .filter(a -> (a.getStatus() == AttemptStatus.SUBMITTED || a.getStatus() == AttemptStatus.COMPLETED) && a.getPercentage() != null)
+                .mapToDouble(ExamAttempt::getPercentage)
+                .average()
+                .orElse(0.0);
+
+        long passedCount = allAttempts.stream()
+                .filter(a -> (a.getStatus() == AttemptStatus.SUBMITTED || a.getStatus() == AttemptStatus.COMPLETED) && Boolean.TRUE.equals(a.getPassed()))
+                .count();
+
+        double passRate = submissionsCount > 0 ? (passedCount * 100.0) / submissionsCount : 0.0;
+
+        long terminatedCount = allAttempts.stream()
+                .filter(a -> a.getStatus() == AttemptStatus.DISQUALIFIED)
+                .count();
+
+        long flaggedCount = allAttempts.stream()
+                .filter(a -> a.getStatus() == AttemptStatus.DISQUALIFIED || (a.getIntegrityScore() != null && a.getIntegrityScore() < 70))
+                .count();
+
+        // Total violations from both cheatingLogs and proctoring_events
+        long eventViolationsCount = eventRepository.findAll().stream()
+                .filter(ev -> ev.getSession() != null && ev.getSession().getAttempt() != null &&
+                        allowedExamIds.contains(ev.getSession().getAttempt().getExam().getId()) &&
+                        !"EXAM_STARTED".equalsIgnoreCase(ev.getEventType()) &&
+                        !"QUESTION_ANSWERED".equalsIgnoreCase(ev.getEventType()) &&
+                        !"EXAM_SUBMITTED".equalsIgnoreCase(ev.getEventType()))
+                .count();
+        long finalViolations = Math.max(totalViolations, eventViolationsCount);
+
         Map<String, Object> stats = new HashMap<>();
-        stats.put("totalStudents", totalStudentsCount);
+        stats.put("totalStudents", enrolledStudentsCount > 0 ? enrolledStudentsCount : totalStudentsCount);
+        stats.put("enrolledStudents", enrolledStudentsCount > 0 ? enrolledStudentsCount : totalStudentsCount);
         stats.put("totalExams", exams.size());
+        stats.put("activeExams", activeExamsCount);
         stats.put("totalSessions", allAttempts.size());
+        stats.put("submissions", submissionsCount);
         stats.put("activeSessions", activeSessionsCount);
-        stats.put("totalViolations", totalViolations);
+        stats.put("studentsTakingExam", activeSessionsCount);
+        stats.put("studentsCurrentlyTakingExams", activeSessionsCount);
+        stats.put("averageScore", Math.round(avgScore * 10.0) / 10.0);
+        stats.put("passRate", Math.round(passRate * 10.0) / 10.0);
+        stats.put("totalViolations", finalViolations);
+        stats.put("flaggedCount", flaggedCount);
         stats.put("highRiskSessions", highRiskCount);
         stats.put("cleanSessions", cleanCount);
         stats.put("safeSessions", cleanCount);
         stats.put("warningSessions", warningCount);
         stats.put("malpracticeSessions", highRiskCount);
-        stats.put("terminatedSessions", 0);
+        stats.put("terminatedSessions", terminatedCount);
         stats.put("avgFairnessScore", Math.round(avgIntegrity * 10.0) / 10.0);
         stats.put("averageIntegrity", Math.round(avgIntegrity * 10.0) / 10.0);
 
@@ -157,7 +219,7 @@ public class AdminController {
             sm.put("id", attempt.getId());
 
             String sName = attempt.getStudent() != null ? attempt.getStudent().getName() : "Student";
-            String sEmail = attempt.getStudent() != null ? attempt.getStudent().getEmail() : "student@demo.edu";
+            String sEmail = attempt.getStudent() != null ? attempt.getStudent().getEmail() : "";
             Map<String, String> sIdMap = new HashMap<>();
             sIdMap.put("name", sName);
             sIdMap.put("email", sEmail);
@@ -321,6 +383,58 @@ public class AdminController {
                     topViolators.add(tv);
                 });
 
+        // Violations timeline: group events by chronological date
+        Map<String, Long> timelineMap = new TreeMap<>();
+        for (ExamAttempt att : attempts) {
+            Optional<ProctoringSession> psOpt = sessionRepository.findByAttemptId(att.getId());
+            if (psOpt.isPresent()) {
+                List<ProctoringEvent> evList = eventRepository.findBySessionIdOrderByTimestampAsc(psOpt.get().getId());
+                for (ProctoringEvent ev : evList) {
+                    if (ev.getTimestamp() != null) {
+                        String day = ev.getTimestamp().toLocalDate().toString();
+                        timelineMap.put(day, timelineMap.getOrDefault(day, 0L) + 1);
+                    }
+                }
+            }
+        }
+        if (timelineMap.isEmpty()) {
+            for (CheatingLogEntry c : cheatingLogs) {
+                if (c.getCreatedAt() != null) {
+                    String day = c.getCreatedAt().toLocalDate().toString();
+                    long cCount = (c.getNoFaceCount() != null ? c.getNoFaceCount() : 0) +
+                                  (c.getMultipleFaceCount() != null ? c.getMultipleFaceCount() : 0) +
+                                  (c.getCellPhoneCount() != null ? c.getCellPhoneCount() : 0) +
+                                  (c.getProhibitedObjectCount() != null ? c.getProhibitedObjectCount() : 0);
+                    if (cCount > 0) {
+                        timelineMap.put(day, timelineMap.getOrDefault(day, 0L) + cCount);
+                    }
+                }
+            }
+        }
+        List<Map<String, Object>> violationsTimeline = new ArrayList<>();
+        timelineMap.forEach((day, cnt) -> violationsTimeline.add(Map.of("_id", day, "count", cnt)));
+
+        // Score Distribution & Stats
+        long passedCount = attempts.stream().filter(a -> Boolean.TRUE.equals(a.getPassed())).count();
+        long failedCount = Math.max(0, attempts.size() - passedCount);
+        double avgScore = attempts.isEmpty() ? 0.0 :
+                Math.round(attempts.stream().mapToDouble(a -> a.getScore() != null ? a.getScore() : 0.0).average().orElse(0.0) * 10.0) / 10.0;
+        double highScore = attempts.stream().mapToDouble(a -> a.getScore() != null ? a.getScore() : 0.0).max().orElse(0.0);
+        double lowScore = attempts.isEmpty() ? 0.0 : attempts.stream().mapToDouble(a -> a.getScore() != null ? a.getScore() : 0.0).min().orElse(0.0);
+
+        long dist0to20 = attempts.stream().filter(a -> (a.getPercentage() != null ? a.getPercentage() : 0.0) < 20.0).count();
+        long dist20to40 = attempts.stream().filter(a -> { double p = a.getPercentage() != null ? a.getPercentage() : 0.0; return p >= 20.0 && p < 40.0; }).count();
+        long dist40to60 = attempts.stream().filter(a -> { double p = a.getPercentage() != null ? a.getPercentage() : 0.0; return p >= 40.0 && p < 60.0; }).count();
+        long dist60to80 = attempts.stream().filter(a -> { double p = a.getPercentage() != null ? a.getPercentage() : 0.0; return p >= 60.0 && p < 80.0; }).count();
+        long dist80to100 = attempts.stream().filter(a -> (a.getPercentage() != null ? a.getPercentage() : 0.0) >= 80.0).count();
+
+        List<Map<String, Object>> scoreDistribution = new ArrayList<>();
+        scoreDistribution.add(Map.of("range", "0-20%", "count", dist0to20));
+        scoreDistribution.add(Map.of("range", "20-40%", "count", dist20to40));
+        scoreDistribution.add(Map.of("range", "40-60%", "count", dist40to60));
+        scoreDistribution.add(Map.of("range", "60-80%", "count", dist60to80));
+        scoreDistribution.add(Map.of("range", "80-100%", "count", dist80to100));
+
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("violationsByType", violationsByType);
@@ -329,7 +443,14 @@ public class AdminController {
         response.put("scoresByExam", scoresByExam);
         response.put("confidenceByType", confidenceByType);
         response.put("topViolators", topViolators);
-        response.put("violationsTimeline", Collections.emptyList());
+        response.put("violationsTimeline", violationsTimeline);
+        response.put("totalAttempts", attempts.size());
+        response.put("passedCount", passedCount);
+        response.put("failedCount", failedCount);
+        response.put("averageScore", avgScore);
+        response.put("highestScore", highScore);
+        response.put("lowestScore", lowScore);
+        response.put("scoreDistribution", scoreDistribution);
 
         return ResponseEntity.ok(response);
     }
@@ -347,8 +468,17 @@ public class AdminController {
         Set<Long> allowedExamIds = exams.stream().map(Exam::getId).collect(Collectors.toSet());
         Set<String> allowedExamCodes = exams.stream().map(Exam::getExamCode).collect(Collectors.toSet());
 
+        // Get in-progress attempts first, plus recently submitted or terminated attempts
         List<ExamAttempt> inProgressAttempts = attemptRepository.findAll().stream()
-                .filter(a -> a.getStatus() == AttemptStatus.IN_PROGRESS && a.getExam() != null && allowedExamIds.contains(a.getExam().getId()))
+                .filter(a -> a.getExam() != null && allowedExamIds.contains(a.getExam().getId()))
+                .filter(a -> a.getStatus() == AttemptStatus.IN_PROGRESS ||
+                             a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                             (a.getSubmittedAt() != null && a.getSubmittedAt().isAfter(LocalDateTime.now().minusHours(1))))
+                .sorted((a, b) -> {
+                    LocalDateTime ta = a.getStartedAt() != null ? a.getStartedAt() : LocalDateTime.MIN;
+                    LocalDateTime tb = b.getStartedAt() != null ? b.getStartedAt() : LocalDateTime.MIN;
+                    return tb.compareTo(ta);
+                })
                 .collect(Collectors.toList());
 
         List<CheatingLogEntry> cheatingLogs = cheatingLogRepository.findAll().stream()
@@ -362,7 +492,7 @@ public class AdminController {
             item.put("id", attempt.getId());
 
             String sName = attempt.getStudent() != null ? attempt.getStudent().getName() : "Student";
-            String sEmail = attempt.getStudent() != null ? attempt.getStudent().getEmail() : "student@demo.edu";
+            String sEmail = attempt.getStudent() != null ? attempt.getStudent().getEmail() : "";
             Map<String, String> sIdMap = new HashMap<>();
             sIdMap.put("name", sName);
             sIdMap.put("email", sEmail);
@@ -381,13 +511,27 @@ public class AdminController {
             }
             item.put("timeLeftSeconds", timeLeftSeconds);
 
-            long vCount = cheatingLogs.stream()
-                    .filter(c -> sEmail.equalsIgnoreCase(c.getEmail()) && eCode.equalsIgnoreCase(c.getExamId()))
-                    .mapToLong(c -> (c.getNoFaceCount() != null ? c.getNoFaceCount() : 0) +
-                                    (c.getMultipleFaceCount() != null ? c.getMultipleFaceCount() : 0) +
-                                    (c.getCellPhoneCount() != null ? c.getCellPhoneCount() : 0) +
-                                    (c.getProhibitedObjectCount() != null ? c.getProhibitedObjectCount() : 0))
-                    .sum();
+            // Fetch violations from session & eventRepository
+            Optional<ProctoringSession> psOpt = sessionRepository.findByAttemptId(attempt.getId());
+            long vCount = 0;
+            ProctoringEvent latestEv = null;
+            if (psOpt.isPresent()) {
+                List<ProctoringEvent> evs = eventRepository.findBySessionIdOrderByTimestampAsc(psOpt.get().getId());
+                vCount = evs.size();
+                if (!evs.isEmpty()) {
+                    latestEv = evs.get(evs.size() - 1);
+                }
+            }
+
+            if (vCount == 0) {
+                vCount = cheatingLogs.stream()
+                        .filter(c -> sEmail.equalsIgnoreCase(c.getEmail()) && eCode.equalsIgnoreCase(c.getExamId()))
+                        .mapToLong(c -> (c.getNoFaceCount() != null ? c.getNoFaceCount() : 0) +
+                                        (c.getMultipleFaceCount() != null ? c.getMultipleFaceCount() : 0) +
+                                        (c.getCellPhoneCount() != null ? c.getCellPhoneCount() : 0) +
+                                        (c.getProhibitedObjectCount() != null ? c.getProhibitedObjectCount() : 0))
+                        .sum();
+            }
             item.put("totalViolations", vCount);
 
             double integrity = attempt.getIntegrityScore() != null ? attempt.getIntegrityScore() : 100.0;
@@ -398,8 +542,30 @@ public class AdminController {
             else if (integrity < 80) classification = "WARNING";
             item.put("classification", classification);
 
-            item.put("lastEvent", "Monitoring Active");
-            item.put("status", "IN_PROGRESS");
+            if (latestEv != null) {
+                Map<String, Object> latestMap = new HashMap<>();
+                latestMap.put("eventType", latestEv.getEventType());
+                latestMap.put("severity", latestEv.getSeverity() != null ? latestEv.getSeverity().toString() : "MEDIUM");
+                latestMap.put("timestamp", latestEv.getTimestamp() != null ? latestEv.getTimestamp().toString() : LocalDateTime.now().toString());
+                item.put("latestViolation", latestMap);
+                item.put("lastEvent", latestEv.getEventType().replace("_", " "));
+            } else {
+                item.put("latestViolation", null);
+                item.put("lastEvent", vCount > 0 ? "Violation Logged" : "Monitoring Active");
+            }
+
+            // Real status: active, flagged, terminated, submitted
+            String status = "active";
+            if (attempt.getStatus() == AttemptStatus.DISQUALIFIED) {
+                status = "terminated";
+            } else if (attempt.getStatus() == AttemptStatus.COMPLETED) {
+                status = "submitted";
+            } else if (vCount > 0 || integrity < 80) {
+                status = "flagged";
+            }
+            item.put("status", status);
+            item.put("attemptStatus", attempt.getStatus().toString());
+            item.put("score", attempt.getScore() != null ? attempt.getScore() : 0.0);
 
             result.add(item);
         }
@@ -412,13 +578,186 @@ public class AdminController {
      */
     @GetMapping({"/api/proctoring/report/{sessionId}", "/api/admin/report/{sessionId}"})
     public ResponseEntity<Map<String, Object>> getProctoringReport(@PathVariable String sessionId) {
+        Long id = null;
+        try {
+            id = Long.parseLong(sessionId);
+        } catch (Exception ignored) {}
+
+        ExamAttempt attempt = null;
+        ProctoringSession session = null;
+
+        if (id != null) {
+            session = sessionRepository.findById(id).orElse(null);
+            if (session == null) {
+                session = sessionRepository.findByAttemptId(id).orElse(null);
+            }
+            if (session != null) {
+                attempt = session.getAttempt();
+            } else {
+                attempt = attemptRepository.findById(id).orElse(null);
+                if (attempt != null) {
+                    session = sessionRepository.findByAttemptId(attempt.getId()).orElse(null);
+                }
+            }
+        }
+
         Map<String, Object> report = new HashMap<>();
-        report.put("sessionId", sessionId);
-        report.put("status", "COMPLETED");
-        report.put("fairnessScore", 95);
-        report.put("classification", "SAFE");
-        report.put("totalViolations", 0);
-        report.put("timeline", Collections.emptyList());
-        return ResponseEntity.ok(report);
+        Map<String, Object> studentMap = new HashMap<>();
+        Map<String, Object> examMap = new HashMap<>();
+        Map<String, Object> sessionMap = new HashMap<>();
+        Map<String, Object> resultMap = new HashMap<>();
+        Map<String, Object> proctoringMap = new HashMap<>();
+        Map<String, Integer> violationsByType = new LinkedHashMap<>();
+        Map<String, Integer> violationsBySeverity = new LinkedHashMap<>();
+        List<Map<String, Object>> violationList = new ArrayList<>();
+        List<Map<String, Object>> evidenceList = new ArrayList<>();
+
+        if (attempt != null) {
+            if (attempt.getStudent() != null) {
+                studentMap.put("name", attempt.getStudent().getName());
+                studentMap.put("email", attempt.getStudent().getEmail());
+                studentMap.put("id", attempt.getStudent().getId().toString());
+            }
+            if (attempt.getExam() != null) {
+                examMap.put("name", attempt.getExam().getExamName());
+                examMap.put("examId", attempt.getExam().getExamCode());
+                examMap.put("examCode", attempt.getExam().getExamCode());
+                examMap.put("totalMarks", attempt.getExam().getTotalMarks());
+            }
+
+            sessionMap.put("status", attempt.getStatus().name());
+            sessionMap.put("startTime", attempt.getStartedAt() != null ? attempt.getStartedAt().toString() : "");
+            sessionMap.put("endTime", attempt.getSubmittedAt() != null ? attempt.getSubmittedAt().toString() : "");
+            if (attempt.getStartedAt() != null && attempt.getSubmittedAt() != null) {
+                sessionMap.put("duration", Duration.between(attempt.getStartedAt(), attempt.getSubmittedAt()).getSeconds());
+            } else {
+                sessionMap.put("duration", 0);
+            }
+
+            resultMap.put("score", attempt.getScore() != null ? attempt.getScore() : 0.0);
+            resultMap.put("totalMarks", attempt.getExam() != null ? attempt.getExam().getTotalMarks() : 100);
+            resultMap.put("percentage", attempt.getPercentage() != null ? attempt.getPercentage() : 0.0);
+            resultMap.put("passed", attempt.getPassed() != null ? attempt.getPassed() : false);
+        }
+
+        double fairnessScore = 100.0;
+        double eventScore = 0.0;
+        double aiScore = 0.0;
+        String classification = "SAFE";
+        int totalPenalties = 0;
+
+        if (session != null) {
+            fairnessScore = session.getIntegrityScore() != null ? session.getIntegrityScore() : 100.0;
+            eventScore = session.getEventScore() != null ? session.getEventScore() : 0.0;
+            aiScore = session.getAiScore() != null ? session.getAiScore() : 0.0;
+            classification = session.getVerdict() != null ? session.getVerdict() : "SAFE";
+
+            List<ProctoringEvent> events = eventRepository.findBySessionIdOrderByTimestampAsc(session.getId());
+            for (ProctoringEvent ev : events) {
+                String type = ev.getEventType();
+                if ("EXAM_STARTED".equalsIgnoreCase(type) || "QUESTION_ANSWERED".equalsIgnoreCase(type) || "EXAM_SUBMITTED".equalsIgnoreCase(type)) {
+                    continue;
+                }
+                violationsByType.put(type, violationsByType.getOrDefault(type, 0) + 1);
+                String sev = ev.getSeverity().name();
+                violationsBySeverity.put(sev, violationsBySeverity.getOrDefault(sev, 0) + 1);
+                totalPenalties += ev.getPenaltyPoints();
+
+                Map<String, Object> vm = new HashMap<>();
+                vm.put("id", ev.getId().toString());
+                vm.put("eventType", type);
+                vm.put("severity", sev);
+                vm.put("penaltyPoints", ev.getPenaltyPoints());
+                vm.put("confidence", ev.getConfidence());
+                vm.put("timestamp", ev.getTimestamp().toString());
+                vm.put("evidenceUrl", ev.getEvidenceUrl());
+                vm.put("description", ev.getDescription());
+                violationList.add(vm);
+
+                if (ev.getEvidenceUrl() != null && !ev.getEvidenceUrl().isEmpty()) {
+                    evidenceList.add(Map.of(
+                            "url", ev.getEvidenceUrl(),
+                            "type", type,
+                            "timestamp", ev.getTimestamp().toString()
+                    ));
+                }
+            }
+        }
+
+        proctoringMap.put("classification", classification);
+        proctoringMap.put("fairnessScore", Math.round(fairnessScore));
+        proctoringMap.put("eventScore", Math.round(eventScore));
+        proctoringMap.put("aiScore", Math.round(aiScore));
+        proctoringMap.put("totalViolations", violationList.size());
+        proctoringMap.put("totalPenalties", totalPenalties);
+        proctoringMap.put("decisionReason", classification.equals("SAFE") ? "No significant violations detected" :
+                classification.equals("WARNING") ? "Minor anomalies observed during session" : "Malpractice detected during proctored exam");
+
+        report.put("student", studentMap);
+        report.put("exam", examMap);
+        report.put("session", sessionMap);
+        report.put("result", resultMap);
+        report.put("proctoring", proctoringMap);
+        report.put("violationsByType", violationsByType);
+        report.put("violationsBySeverity", violationsBySeverity);
+        report.put("violations", violationList);
+        report.put("evidence", evidenceList);
+
+        return ResponseEntity.ok(Map.of("report", report, "data", report));
+    }
+
+    /**
+     * Real-time activity & violation stream for teacher panel
+     */
+    @GetMapping("/api/admin/logs")
+    public ResponseEntity<List<Map<String, Object>>> getAdminLogs(
+            @RequestParam(required = false) String examId,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+
+        CustomUserDetails resolved = resolveUser(userDetails);
+        boolean isTeacher = resolved != null && "ROLE_TEACHER".equals(resolved.getRole());
+        List<Exam> exams;
+        if (isTeacher) {
+            exams = examRepository.findByTeacherId(resolved.getId());
+        } else {
+            exams = examRepository.findAll();
+        }
+
+        Set<Long> allowedExamIds = exams.stream().map(Exam::getId).collect(Collectors.toSet());
+
+        List<ProctoringEvent> events = eventRepository.findAll().stream()
+                .filter(ev -> ev.getSession() != null && ev.getSession().getAttempt() != null &&
+                        allowedExamIds.contains(ev.getSession().getAttempt().getExam().getId()))
+                .filter(ev -> {
+                    if (examId != null && !examId.trim().isEmpty() && !"all".equalsIgnoreCase(examId)) {
+                        Exam ex = ev.getSession().getAttempt().getExam();
+                        return ex.getExamCode().equalsIgnoreCase(examId) || String.valueOf(ex.getId()).equals(examId);
+                    }
+                    return true;
+                })
+                .sorted((a, b) -> b.getTimestamp().compareTo(a.getTimestamp()))
+                .limit(100)
+                .collect(Collectors.toList());
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (ProctoringEvent ev : events) {
+            ExamAttempt att = ev.getSession().getAttempt();
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", ev.getId().toString());
+            map.put("timestamp", ev.getTimestamp().toString());
+            map.put("eventType", ev.getEventType());
+            map.put("severity", ev.getSeverity().name());
+            map.put("penaltyPoints", ev.getPenaltyPoints());
+            map.put("description", ev.getDescription());
+            map.put("evidenceUrl", ev.getEvidenceUrl());
+            map.put("confidence", ev.getConfidence());
+            map.put("studentName", att.getStudent() != null ? att.getStudent().getName() : "Student");
+            map.put("studentEmail", att.getStudent() != null ? att.getStudent().getEmail() : "");
+            map.put("examCode", att.getExam() != null ? att.getExam().getExamCode() : "");
+            map.put("examName", att.getExam() != null ? att.getExam().getExamName() : "");
+            result.add(map);
+        }
+
+        return ResponseEntity.ok(result);
     }
 }

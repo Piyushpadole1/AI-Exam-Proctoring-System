@@ -47,14 +47,14 @@ const AuthRegister = ({ formik, title, subtitle, subtext }) => {
             <Tab
               icon={<SchoolIcon />}
               iconPosition="start"
-              label="Register as Student"
+              label="Student"
               value="student"
               sx={{ fontWeight: 600 }}
             />
             <Tab
               icon={<PersonIcon />}
               iconPosition="start"
-              label="Register as Teacher"
+              label="Teacher"
               value="teacher"
               sx={{ fontWeight: 600 }}
             />

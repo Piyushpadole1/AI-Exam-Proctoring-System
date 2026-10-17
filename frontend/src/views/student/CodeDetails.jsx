@@ -31,7 +31,12 @@ const CodeDetailsMore = () => {
     const fetchExam = async () => {
       try {
         const res = await axiosInstance.get('/api/users/exam', { withCredentials: true });
-        const found = res.data?.find((e) => e.examId === examId);
+        const found = res.data?.find((e) => e.examId === examId || e._id === examId || e.id === examId);
+        if (found && !found.hasCodingRound) {
+          toast.info('This exam does not include a coding round.');
+          navigate('/result');
+          return;
+        }
         setExam(found || null);
       } catch (err) {
         console.error('Failed to fetch exam:', err);
@@ -40,7 +45,7 @@ const CodeDetailsMore = () => {
       }
     };
     if (examId) fetchExam();
-  }, [examId]);
+  }, [examId, navigate]);
 
   const handleCodeTest = () => {
     if (!exam) {

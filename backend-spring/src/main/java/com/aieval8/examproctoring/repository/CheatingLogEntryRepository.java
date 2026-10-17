@@ -10,5 +10,6 @@ import java.util.List;
 public interface CheatingLogEntryRepository extends JpaRepository<CheatingLogEntry, Long> {
     List<CheatingLogEntry> findByExamIdOrderByCreatedAtDesc(String examId);
     List<CheatingLogEntry> findByExamId(String examId);
+    java.util.Optional<CheatingLogEntry> findFirstByExamIdAndEmail(String examId, String email);
     void deleteByExamId(String examId);
 }

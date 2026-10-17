@@ -27,7 +27,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Map<String, Object>> handleAccessDenied(AccessDeniedException ex) {
-        return buildResponse(HttpStatus.FORBIDDEN, "Access Denied: You are not authorized to perform this operation.");
+        String msg = (ex.getMessage() != null && !ex.getMessage().isBlank()) ? ex.getMessage() : "Access Denied: You are not authorized to perform this operation.";
+        return buildResponse(HttpStatus.FORBIDDEN, msg);
     }
 
     @ExceptionHandler(BadCredentialsException.class)

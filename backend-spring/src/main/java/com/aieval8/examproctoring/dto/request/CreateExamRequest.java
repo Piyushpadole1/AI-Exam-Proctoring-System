@@ -30,6 +30,8 @@ public class CreateExamRequest {
     private Integer totalQuestions = 0;
     private Double totalMarks = 100.0;
     private Double passingMarks = 40.0;
+    private Boolean hasCodingRound = false;
+    private Double codingMarks = 0.0;
 
     public CreateExamRequest() {
     }
@@ -144,5 +146,21 @@ public class CreateExamRequest {
 
     public void setTotalQuestions(Integer totalQuestions) {
         this.totalQuestions = totalQuestions;
+    }
+
+    public Boolean getHasCodingRound() {
+        return hasCodingRound != null ? hasCodingRound : false;
+    }
+
+    public void setHasCodingRound(Boolean hasCodingRound) {
+        this.hasCodingRound = hasCodingRound != null ? hasCodingRound : false;
+    }
+
+    public Double getCodingMarks() {
+        return codingMarks != null ? codingMarks : 0.0;
+    }
+
+    public void setCodingMarks(Double codingMarks) {
+        this.codingMarks = codingMarks != null ? codingMarks : 0.0;
     }
 }

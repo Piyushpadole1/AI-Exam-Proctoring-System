@@ -44,64 +44,75 @@ export default function ProctoringManager({
     async (violation) => {
       if (!sessionId || !isActive || isTerminated) return;
 
-      try {
-        // Send to backend
-        const response = await axiosInstance.post(
-          '/api/proctoring/events',
-          {
-            sessionId,
-            eventType: violation.eventType,
-            confidence: violation.confidence || 1.0,
-            description: violation.description || '',
-            metadata: violation.metadata || {},
-          },
-          { withCredentials: true },
-        );
+      const payload = {
+        sessionId,
+        eventType: violation.eventType,
+        confidence: violation.confidence || 1.0,
+        description: violation.description || '',
+        evidenceUrl: violation.evidenceUrl || violation.screenshot || null,
+        metadata: violation.metadata || {},
+      };
 
-        const data = response.data;
-
-        if (data.success) {
-          setCurrentScore(data.currentScore || 0);
-          setClassification(data.classification || 'SAFE');
-          setTotalViolations((prev) => prev + 1);
-
-          // Update legacy cheating log context for backward compatibility
-          const typeMap = {
-            NO_FACE_DETECTED: 'noFaceCount',
-            MULTIPLE_FACES: 'multipleFaceCount',
-            CELL_PHONE_DETECTED: 'cellPhoneCount',
-            BOOK_DETECTED: 'prohibitedObjectCount',
-            LAPTOP_DETECTED: 'prohibitedObjectCount',
-            PROHIBITED_OBJECT: 'prohibitedObjectCount',
-          };
-          const logKey = typeMap[violation.eventType];
-          if (logKey && updateCheatingLog) {
-            updateCheatingLog({
-              ...cheatingLog,
-              [logKey]: (cheatingLog[logKey] || 0) + 1,
-              examId,
-            });
+      // Retry up to 2 times on transient failures
+      let response = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          response = await axiosInstance.post('/api/proctoring/events', payload, {
+            withCredentials: true,
+          });
+          if (response?.data) break;
+        } catch (err) {
+          if (attempt === 2) {
+            console.error('[ProctoringManager] Failed to log violation after retries:', err.message);
+            return;
           }
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
+      }
 
-          // Capture evidence for high-severity events
-          if (
-            ['MULTIPLE_FACES', 'CELL_PHONE_DETECTED', 'NO_FACE_DETECTED'].includes(
-              violation.eventType,
-            )
-          ) {
-            captureEvidence(violation.eventType);
-          }
+      if (!response?.data) return;
+      const data = response.data;
 
-          // Check auto-termination
-          if (data.shouldTerminate) {
-            setIsTerminated(true);
-            if (onTerminate) {
-              onTerminate('Exam terminated: Malpractice threshold exceeded');
-            }
+      if (data.success) {
+        setCurrentScore(data.currentScore || 0);
+        setClassification(data.classification || 'SAFE');
+        setTotalViolations((prev) => prev + 1);
+
+        // Update legacy cheating log context for backward compatibility
+        const typeMap = {
+          NO_FACE_DETECTED: 'noFaceCount',
+          MULTIPLE_FACES: 'multipleFaceCount',
+          CELL_PHONE_DETECTED: 'cellPhoneCount',
+          BOOK_DETECTED: 'prohibitedObjectCount',
+          LAPTOP_DETECTED: 'prohibitedObjectCount',
+          PROHIBITED_OBJECT: 'prohibitedObjectCount',
+        };
+        const logKey = typeMap[violation.eventType];
+        if (logKey && updateCheatingLog) {
+          updateCheatingLog({
+            ...cheatingLog,
+            [logKey]: (cheatingLog[logKey] || 0) + 1,
+            examId,
+          });
+        }
+
+        // Capture evidence for high-severity events if no screenshot was attached
+        if (
+          !payload.evidenceUrl &&
+          ['MULTIPLE_FACES', 'CELL_PHONE_DETECTED', 'NO_FACE_DETECTED'].includes(
+            violation.eventType,
+          )
+        ) {
+          captureEvidence(violation.eventType);
+        }
+
+        // Check auto-termination
+        if (data.shouldTerminate) {
+          setIsTerminated(true);
+          if (onTerminate) {
+            onTerminate('Exam terminated: Malpractice threshold exceeded (6 violations reached).');
           }
         }
-      } catch (error) {
-        console.error('[ProctoringManager] Failed to log violation:', error.message);
       }
     },
     [sessionId, isActive, isTerminated, onTerminate, cheatingLog, updateCheatingLog, examId],
@@ -123,18 +134,27 @@ export default function ProctoringManager({
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         canvas.getContext('2d').drawImage(video, 0, 0);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
 
-        // Convert to file
-        const arr = dataUrl.split(',');
-        const mime = arr[0].match(/:(.*?);/)[1];
-        const bstr = atob(arr[1]);
-        let n = bstr.length;
-        const u8arr = new Uint8Array(n);
-        while (n--) u8arr[n] = bstr.charCodeAt(n);
-        const file = new File([u8arr], `evidence_${eventType}_${Date.now()}.jpg`, { type: mime });
+        let finalUrl = dataUrl;
+        try {
+          // Attempt Uploadcare upload
+          const arr = dataUrl.split(',');
+          const mime = arr[0].match(/:(.*?);/)[1];
+          const bstr = atob(arr[1]);
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while (n--) u8arr[n] = bstr.charCodeAt(n);
+          const file = new File([u8arr], `evidence_${eventType}_${Date.now()}.jpg`, { type: mime });
 
-        const result = await uploadClient.uploadFile(file);
+          const result = await uploadClient.uploadFile(file);
+          if (result?.cdnUrl) {
+            finalUrl = result.cdnUrl;
+          }
+        } catch (uploadErr) {
+          // Fall back gracefully to dataUrl
+          finalUrl = dataUrl;
+        }
 
         // Log evidence to backend
         await axiosInstance.post(
@@ -142,14 +162,14 @@ export default function ProctoringManager({
           {
             sessionId,
             eventType,
-            evidenceUrl: result.cdnUrl,
+            evidenceUrl: finalUrl,
             examId,
             confidence: 1.0,
           },
           { withCredentials: true },
         );
       } catch (err) {
-        console.warn('[ProctoringManager] Evidence capture failed:', err.message);
+        console.warn('[ProctoringManager] Evidence capture warning:', err.message);
       }
     },
     [sessionId, webcamRef, examId],

@@ -62,6 +62,12 @@ public class Exam {
     @Column(name = "passing_marks", nullable = false)
     private Double passingMarks = 40.0;
 
+    @Column(name = "has_coding_round", nullable = false)
+    private Boolean hasCodingRound = false;
+
+    @Column(name = "coding_marks")
+    private Double codingMarks = 0.0;
+
     @Column(nullable = false, length = 20)
     private String status = "PUBLISHED";
 
@@ -250,5 +256,21 @@ public class Exam {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public Boolean getHasCodingRound() {
+        return hasCodingRound != null ? hasCodingRound : false;
+    }
+
+    public void setHasCodingRound(Boolean hasCodingRound) {
+        this.hasCodingRound = hasCodingRound != null ? hasCodingRound : false;
+    }
+
+    public Double getCodingMarks() {
+        return codingMarks != null ? codingMarks : 0.0;
+    }
+
+    public void setCodingMarks(Double codingMarks) {
+        this.codingMarks = codingMarks != null ? codingMarks : 0.0;
     }
 }

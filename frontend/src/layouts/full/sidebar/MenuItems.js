@@ -59,6 +59,13 @@ const Menuitems = [
   },
   {
     id: uniqueId(),
+    title: 'My Exams',
+    icon: IconTypography,
+    href: '/teacher/exams',
+    roles: ['teacher'],
+  },
+  {
+    id: uniqueId(),
     title: 'Create Exam',
     icon: IconMoodHappy,
     href: '/create-exam',
@@ -105,48 +112,6 @@ const Menuitems = [
     icon: IconCopy,
     href: '/result',
     roles: ['teacher'],
-  },
-
-  // Admin Items
-  {
-    navlabel: true,
-    subheader: 'Admin Control',
-    roles: ['admin'],
-  },
-  {
-    id: uniqueId(),
-    title: 'Admin Dashboard',
-    icon: IconDeviceDesktopAnalytics,
-    href: '/admin-dashboard',
-    roles: ['admin'],
-  },
-  {
-    id: uniqueId(),
-    title: 'Enrollment & Users',
-    icon: IconUserCheck,
-    href: '/user-approvals',
-    roles: ['admin'],
-  },
-  {
-    id: uniqueId(),
-    title: 'System Exam Logs',
-    icon: IconUserPlus,
-    href: '/exam-log',
-    roles: ['admin'],
-  },
-  {
-    id: uniqueId(),
-    title: 'Live Monitoring',
-    icon: IconEye,
-    href: '/live-monitoring',
-    roles: ['admin'],
-  },
-  {
-    id: uniqueId(),
-    title: 'System Analytics',
-    icon: IconChartBar,
-    href: '/analytics',
-    roles: ['admin'],
   },
 ];
 

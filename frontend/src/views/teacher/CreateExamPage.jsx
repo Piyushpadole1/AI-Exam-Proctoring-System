@@ -25,9 +25,15 @@ const examValidationSchema = yup.object({
     .required('Exam Duration is required'),
   liveDate: yup.date().required('Live Date and Time is required'),
   deadDate: yup.date().required('Dead Date and Time is required'),
-  codingQuestion: yup.object().shape({
-    question: yup.string().required('Coding Question is required'),
-    description: yup.string().required('Question Description is required'),
+  hasCodingRound: yup.boolean(),
+  codingQuestion: yup.object().when('hasCodingRound', {
+    is: true,
+    then: () =>
+      yup.object({
+        title: yup.string().required('Coding Question Title is required'),
+        description: yup.string().required('Question Description is required'),
+      }),
+    otherwise: () => yup.object().nullable().notRequired(),
   }),
 });
 
@@ -45,9 +51,18 @@ const CreateExamPage = () => {
     duration: '30',
     liveDate: '',
     deadDate: '',
+    hasCodingRound: false,
+    codingMarks: 20,
     codingQuestion: {
+      title: '',
       question: '',
       description: '',
+      constraints: '',
+      difficulty: 'Medium',
+      marks: 20,
+      allowedLanguages: 'javascript,python,java,c,cpp',
+      sampleTestCases: [{ input: '', expectedOutput: '', explanation: '' }],
+      hiddenTestCases: [{ input: '', expectedOutput: '' }],
     },
   };
 
@@ -55,6 +70,8 @@ const CreateExamPage = () => {
     try {
       const examPayload = {
         ...values,
+        hasCodingRound: Boolean(values.hasCodingRound),
+        codingMarks: values.hasCodingRound ? Number(values.codingQuestion?.marks || 20) : 0,
         userId: userInfo?._id || userInfo?.id,
         email: userInfo?.email,
         teacherId: userInfo?._id || userInfo?.id,
@@ -73,36 +90,38 @@ const CreateExamPage = () => {
           return;
         }
 
-        // Then create the coding question
-        const codingQuestionData = {
-          question: values.codingQuestion.question,
-          description: values.codingQuestion.description,
-          examId: examId,
-        };
+        // If coding round is enabled, create the coding question
+        if (values.hasCodingRound && (values.codingQuestion?.title || values.codingQuestion?.question)) {
+          const codingQuestionData = {
+            title: values.codingQuestion.title || values.codingQuestion.question,
+            question: values.codingQuestion.title || values.codingQuestion.question,
+            description: values.codingQuestion.description || '',
+            constraints: values.codingQuestion.constraints || '',
+            difficulty: values.codingQuestion.difficulty || 'Medium',
+            marks: values.codingQuestion.marks || 20,
+            allowedLanguages: values.codingQuestion.allowedLanguages || 'javascript,python,java,c,cpp',
+            sampleTestCases: values.codingQuestion.sampleTestCases || [],
+            hiddenTestCases: values.codingQuestion.hiddenTestCases || [],
+            examId: examId,
+          };
 
-        console.log('Coding Question Data:', codingQuestionData);
-
-        try {
-          const codingResponse = await axiosInstance.post(
-            '/api/coding/question',
-            codingQuestionData,
-            {
-              withCredentials: true,
-            },
-          );
-          console.log('Coding Response:', codingResponse.data);
-
-          if (codingResponse.data.success) {
-            toast.success('Exam and coding question created successfully');
-            formik.resetForm();
-          } else {
-            console.error('Failed to create coding question:', codingResponse.data);
-            toast.error('Failed to create coding question');
+          try {
+            const codingResponse = await axiosInstance.post(
+              '/api/coding/question',
+              codingQuestionData,
+              { withCredentials: true }
+            );
+            if (!codingResponse.data.success) {
+              console.warn('Coding question API warning:', codingResponse.data);
+            }
+          } catch (codingError) {
+            console.error('Coding Question Error:', codingError.response?.data || codingError);
+            toast.error(codingError.response?.data?.message || 'Failed to create coding question');
           }
-        } catch (codingError) {
-          console.error('Coding Question Error:', codingError.response?.data || codingError);
-          toast.error(codingError.response?.data?.message || 'Failed to create coding question');
         }
+
+        toast.success(values.hasCodingRound ? 'Exam and coding question created successfully' : 'Exam created successfully');
+        formik.resetForm();
       }
     } catch (err) {
       console.error('Exam Creation Error:', err);

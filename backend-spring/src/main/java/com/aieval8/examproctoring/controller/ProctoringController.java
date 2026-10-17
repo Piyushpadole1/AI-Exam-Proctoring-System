@@ -32,6 +32,15 @@ public class ProctoringController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/evidence")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<ViolationResponse> logEvidence(
+            @RequestBody ViolationEventRequest request,
+            @AuthenticationPrincipal CustomUserDetails studentDetails) {
+        ViolationResponse response = proctoringService.logViolation(request, studentDetails);
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/sessions/{attemptId}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<ProctoringEvent>> getSessionViolations(

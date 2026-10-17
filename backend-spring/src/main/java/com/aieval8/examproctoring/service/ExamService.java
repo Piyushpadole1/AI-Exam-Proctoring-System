@@ -109,6 +109,8 @@ public class ExamService {
         exam.setTotalQuestions(request.getTotalQuestions() != null ? request.getTotalQuestions() : 0);
         exam.setTotalMarks(request.getTotalMarks() != null ? request.getTotalMarks() : 100.0);
         exam.setPassingMarks(request.getPassingMarks() != null ? request.getPassingMarks() : 40.0);
+        exam.setHasCodingRound(Boolean.TRUE.equals(request.getHasCodingRound()));
+        exam.setCodingMarks(request.getCodingMarks() != null ? request.getCodingMarks() : 0.0);
         exam.setStatus("PUBLISHED");
 
         exam = examRepository.save(exam);
@@ -199,6 +201,12 @@ public class ExamService {
         }
         if (request.getPassingMarks() != null) {
             exam.setPassingMarks(request.getPassingMarks());
+        }
+        if (request.getHasCodingRound() != null) {
+            exam.setHasCodingRound(request.getHasCodingRound());
+        }
+        if (request.getCodingMarks() != null) {
+            exam.setCodingMarks(request.getCodingMarks());
         }
         if (request.getExamPassword() != null && !request.getExamPassword().trim().isEmpty()) {
             exam.setExamPasswordHash(passwordEncoder.encode(request.getExamPassword().trim()));

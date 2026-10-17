@@ -16,11 +16,12 @@ import { useNavigate, useParams } from 'react-router';
 import axiosInstance from '../../../axios';
 import { toast } from 'react-toastify';
 
-export default function MultipleChoiceQuestion({ questions, saveUserTestScore, submitTest }) {
+export default function MultipleChoiceQuestion({ questions, saveUserTestScore, submitTest, sessionId }) {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [selectedOption, setSelectedOption] = useState(null);
   const [score, setScore] = useState(0);
   const [answers, setAnswers] = useState(new Map());
+  const [exam, setExam] = useState(null);
   const navigate = useNavigate();
   const { examId } = useParams();
 
@@ -33,22 +34,45 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
     setIsLastQuestion(currentQuestion === questionList.length - 1);
   }, [currentQuestion, questionList.length]);
 
+  useEffect(() => {
+    const fetchExamInfo = async () => {
+      try {
+        const res = await axiosInstance.get(`/api/users/exam/${examId}`);
+        if (res.data) setExam(res.data);
+      } catch (e) {
+        console.warn('Could not load exam details:', e);
+      }
+    };
+    if (examId) fetchExamInfo();
+  }, [examId]);
+
   if (questionList.length === 0) {
+    const hasCoding = Boolean(exam?.hasCodingRound);
     return (
       <Card sx={{ width: '85%', maxWidth: '500px', p: 4, textAlign: 'center', borderRadius: 2 }}>
         <Typography variant="h5" gutterBottom fontWeight={700}>
-          No Multiple-Choice Questions
+          {hasCoding ? 'No Multiple-Choice Questions' : 'Exam Ready for Submission'}
         </Typography>
         <Typography variant="body2" color="textSecondary" mb={3}>
-          This exam focuses on practical programming evaluation. You can now proceed to the Coding Environment.
+          {hasCoding
+            ? 'This exam consists of a programming evaluation. Proceed to the Coding Environment.'
+            : 'All questions have been evaluated. You can submit your exam.'}
         </Typography>
         <Button
           variant="contained"
           color="primary"
-          onClick={() => navigate(`/exam/${examId}/codedetails`)}
+          onClick={() => {
+            if (hasCoding) {
+              navigate(`/exam/${examId}/codedetails`);
+            } else if (submitTest) {
+              submitTest();
+            } else {
+              navigate(`/result`);
+            }
+          }}
           sx={{ fontWeight: 600 }}
         >
-          Proceed to Coding Section
+          {hasCoding ? 'Proceed to Coding Section' : 'Submit Exam'}
         </Button>
       </Card>
     );
@@ -60,7 +84,16 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
   }
 
   const handleOptionChange = (event) => {
-    setSelectedOption(event.target.value);
+    const val = event.target.value;
+    setSelectedOption(val);
+    if (sessionId && currentQuestionData) {
+      try {
+        const qKey = String(currentQuestionData._id || currentQuestionData.id);
+        const currentMap = Object.fromEntries(answers);
+        currentMap[qKey] = val;
+        axiosInstance.put(`/api/sessions/${sessionId}/autosave`, { answers: currentMap }).catch(() => {});
+      } catch (e) {}
+    }
   };
 
   const handleNextQuestion = async () => {
@@ -68,30 +101,33 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
 
     if (currentQuestionData && currentQuestionData.options) {
       const correctOption = currentQuestionData.options.find((option) => option.isCorrect);
-      if (correctOption && selectedOption) {
-        isCorrect = correctOption.id === selectedOption;
+      if (correctOption && selectedOption !== null) {
+        const correctVal = String(
+          correctOption.id !== undefined ? correctOption.id : (correctOption.index !== undefined ? correctOption.index : correctOption.optionText)
+        );
+        isCorrect = correctVal === String(selectedOption);
       }
     }
 
-    // Add answer to answers Map
-    setAnswers((prev) => {
-      const newAnswers = new Map(prev);
-      newAnswers.set(currentQuestionData._id, selectedOption);
-      return newAnswers;
-    });
+    const qKey = String(currentQuestionData._id || currentQuestionData.id);
+    const updatedAnswers = new Map(answers);
+    if (selectedOption !== null) {
+      updatedAnswers.set(qKey, selectedOption);
+    }
+    setAnswers(updatedAnswers);
 
     if (isCorrect) {
       setScore(score + 1);
-      saveUserTestScore();
+      if (saveUserTestScore) saveUserTestScore();
     }
 
     if (isLastQuestion) {
-      try {
-        const answersObject = Object.fromEntries(answers);
-        if (selectedOption) {
-          answersObject[currentQuestionData._id] = selectedOption;
-        }
+      const answersObject = Object.fromEntries(updatedAnswers);
+      if (selectedOption !== null) {
+        answersObject[qKey] = selectedOption;
+      }
 
+      try {
         await axiosInstance.post(
           '/api/users/results',
           {
@@ -102,11 +138,19 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
             withCredentials: true,
           },
         );
-
-        navigate(`/exam/${examId}/codedetails`);
       } catch (error) {
-        console.error('Error saving results:', error);
-        toast.error('Failed to save results');
+        console.warn('Error recording result in legacy endpoint:', error);
+      }
+
+      if (exam?.hasCodingRound) {
+        navigate(`/exam/${examId}/codedetails`);
+      } else {
+        toast.success('Exam completed successfully!');
+        if (submitTest) {
+          submitTest(answersObject);
+        } else {
+          navigate(`/result`);
+        }
       }
     }
 
@@ -144,18 +188,34 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
             <RadioGroup
               aria-label="quiz"
               name="quiz"
-              value={selectedOption || ''}
+              value={selectedOption !== null ? String(selectedOption) : ''}
               onChange={handleOptionChange}
             >
               {Array.isArray(currentQuestionData.options) &&
-                currentQuestionData.options.map((option) => (
-                  <FormControlLabel
-                    key={option._id || option.id || option.optionText}
-                    value={option._id || option.id || option.optionText}
-                    control={<Radio />}
-                    label={option.optionText || option.text}
-                  />
-                ))}
+                currentQuestionData.options.map((option, idx) => {
+                  const optText =
+                    option.optionText ||
+                    option.text ||
+                    option.option ||
+                    (typeof option === 'string' ? option : `Option ${idx + 1}`);
+                  const optVal = String(
+                    option.id !== undefined && option.id !== null
+                      ? option.id
+                      : option._id !== undefined && option._id !== null
+                        ? option._id
+                        : option.index !== undefined && option.index !== null
+                          ? option.index
+                          : idx
+                  );
+                  return (
+                    <FormControlLabel
+                      key={optVal + '-' + idx}
+                      value={optVal}
+                      control={<Radio />}
+                      label={optText}
+                    />
+                  );
+                })}
             </RadioGroup>
           </FormControl>
         </Box>
@@ -167,7 +227,7 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
             disabled={selectedOption === null}
             style={{ marginLeft: 'auto' }}
           >
-            {isLastQuestion ? 'Proceed to Coding' : 'Next Question'}
+            {isLastQuestion ? (exam?.hasCodingRound ? 'Proceed to Coding' : 'Submit Exam') : 'Next Question'}
           </Button>
         </Stack>
       </CardContent>

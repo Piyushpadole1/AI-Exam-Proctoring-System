@@ -51,6 +51,8 @@ const UserApprovalsPage = () => {
   const [emailToEnroll, setEmailToEnroll] = useState('');
   const [studentFilter, setStudentFilter] = useState('');
   const [tabValue, setTabValue] = useState(0);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [loadingPending, setLoadingPending] = useState(false);
 
   // Set default selected exam once exams load
   useEffect(() => {
@@ -86,6 +88,20 @@ const UserApprovalsPage = () => {
     }
   };
 
+  // Fetch pending enrollment requests
+  const fetchPendingRequests = async (examCode) => {
+    if (!examCode) return;
+    try {
+      setLoadingPending(true);
+      const res = await axiosInstance.get(`/api/users/exam/${examCode}/enrollment-requests`);
+      setPendingRequests(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error('Error fetching pending requests:', err);
+    } finally {
+      setLoadingPending(false);
+    }
+  };
+
   useEffect(() => {
     fetchAllStudents();
   }, []);
@@ -93,8 +109,37 @@ const UserApprovalsPage = () => {
   useEffect(() => {
     if (selectedExamId) {
       fetchEnrolledStudents(selectedExamId);
+      fetchPendingRequests(selectedExamId);
     }
   }, [selectedExamId]);
+
+  const handleApproveStudent = async (studentId, studentName) => {
+    try {
+      setActionLoading(true);
+      await axiosInstance.post(`/api/users/exam/${selectedExamId}/approve-student/${studentId}`);
+      toast.success(`Approved ${studentName || 'student'} for exam!`);
+      fetchEnrolledStudents(selectedExamId);
+      fetchPendingRequests(selectedExamId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to approve student');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRejectStudent = async (studentId, studentName) => {
+    try {
+      setActionLoading(true);
+      await axiosInstance.post(`/api/users/exam/${selectedExamId}/reject-student/${studentId}`);
+      toast.info(`Rejected request from ${studentName || 'student'}.`);
+      fetchEnrolledStudents(selectedExamId);
+      fetchPendingRequests(selectedExamId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to reject student');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // Handle Quick Enroll by Email
   const handleEnrollByEmail = async () => {
@@ -200,7 +245,7 @@ const UserApprovalsPage = () => {
               <TextField
                 size="small"
                 label="Student Email to Enroll"
-                placeholder="student@demo.edu"
+                placeholder="student@example.com"
                 value={emailToEnroll}
                 onChange={(e) => setEmailToEnroll(e.target.value)}
                 sx={{ flexGrow: 1 }}
@@ -235,6 +280,11 @@ const UserApprovalsPage = () => {
                 icon={<SchoolIcon />}
                 iconPosition="start"
                 label={`Available Students (${availableToEnroll.length})`}
+              />
+              <Tab
+                icon={<CheckCircleIcon />}
+                iconPosition="start"
+                label={`Pending Requests (${pendingRequests.filter((r) => r.status === 'PENDING').length})`}
               />
             </Tabs>
 
@@ -331,7 +381,9 @@ const UserApprovalsPage = () => {
               ) : availableToEnroll.length === 0 ? (
                 <Box p={4} textAlign="center">
                   <Typography variant="body1" color="text.secondary">
-                    All registered platform students are already enrolled in this exam!
+                    {allStudents.length === 0
+                      ? 'No students registered on the platform yet. When students register, they will appear here for authorization.'
+                      : 'All registered platform students are already enrolled in this exam!'}
                   </Typography>
                 </Box>
               ) : (
@@ -360,7 +412,7 @@ const UserApprovalsPage = () => {
                         </TableCell>
                         <TableCell>{s.email}</TableCell>
                         <TableCell>{s.studentIdNumber || '—'}</TableCell>
-                        <TableCell>{s.institution || 'Engineering Institute'}</TableCell>
+                        <TableCell>{s.institution || 'N/A'}</TableCell>
                         <TableCell align="right">
                           <Button
                             variant="outlined"
@@ -374,6 +426,85 @@ const UserApprovalsPage = () => {
                         </TableCell>
                       </TableRow>
                     ))}
+                  </TableBody>
+                </Table>
+              )}
+            </TableContainer>
+          )}
+
+          {/* Tab 2: Pending Approval Requests */}
+          {tabValue === 2 && (
+            <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2 }}>
+              {loadingPending ? (
+                <Box display="flex" justifyContent="center" py={6}>
+                  <CircularProgress />
+                </Box>
+              ) : pendingRequests.filter((r) => r.status === 'PENDING').length === 0 ? (
+                <Box p={4} textAlign="center">
+                  <Typography variant="body1" color="text.secondary">
+                    No pending enrollment requests for this exam.
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    When students request enrollment, their requests will appear here for one-click approval or rejection.
+                  </Typography>
+                </Box>
+              ) : (
+                <Table>
+                  <TableHead sx={{ backgroundColor: '#f1f5f9' }}>
+                    <TableRow>
+                      <TableCell><strong>Student</strong></TableCell>
+                      <TableCell><strong>Email</strong></TableCell>
+                      <TableCell><strong>Roll / Student ID</strong></TableCell>
+                      <TableCell><strong>Requested At</strong></TableCell>
+                      <TableCell><strong>Status</strong></TableCell>
+                      <TableCell align="right"><strong>Approval Decision</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {pendingRequests
+                      .filter((r) => r.status === 'PENDING')
+                      .map((req) => (
+                        <TableRow key={req.id || req.studentId} hover>
+                          <TableCell>
+                            <Stack direction="row" spacing={1.5} alignItems="center">
+                              <Avatar sx={{ bgcolor: 'warning.light', color: 'warning.main', width: 32, height: 32 }}>
+                                {req.name ? req.name.charAt(0).toUpperCase() : 'S'}
+                              </Avatar>
+                              <Typography variant="subtitle2" fontWeight={600}>
+                                {req.name}
+                              </Typography>
+                            </Stack>
+                          </TableCell>
+                          <TableCell>{req.email}</TableCell>
+                          <TableCell>{req.studentIdNumber || '—'}</TableCell>
+                          <TableCell>{new Date(req.requestedAt).toLocaleString()}</TableCell>
+                          <TableCell>
+                            <Chip label="PENDING APPROVAL" size="small" color="warning" sx={{ fontWeight: 600 }} />
+                          </TableCell>
+                          <TableCell align="right">
+                            <Stack direction="row" spacing={1} justifyContent="flex-end">
+                              <Button
+                                variant="contained"
+                                color="success"
+                                size="small"
+                                disabled={actionLoading}
+                                onClick={() => handleApproveStudent(req.studentId, req.name)}
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                color="error"
+                                size="small"
+                                disabled={actionLoading}
+                                onClick={() => handleRejectStudent(req.studentId, req.name)}
+                              >
+                                Reject
+                              </Button>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                   </TableBody>
                 </Table>
               )}

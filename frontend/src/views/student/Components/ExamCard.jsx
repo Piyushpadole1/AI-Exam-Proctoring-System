@@ -15,17 +15,58 @@ const defaultImg =
   'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80';
 
 export default function ExamCard({ exam }) {
-  const { examName, duration, totalQuestions, examId, subject, isEnrolled, teacherName, totalMarks } = exam;
+  const { examName, duration, totalQuestions, examId, subject, isEnrolled, enrollmentStatus, teacherName, totalMarks } = exam;
   const { userInfo } = useSelector((state) => state.auth);
   const isTeacher = (userInfo?.role || '').toLowerCase().includes('teacher');
   const navigate = useNavigate();
 
   const handleCardClick = () => {
-    if (!isTeacher && !isEnrolled) {
-      toast.warning('Enrollment Required: You are not enrolled in this exam. Only authorized students may enter.');
-      return;
-    }
     navigate(`/exam/${examId}`);
+  };
+
+  const getStatusChip = () => {
+    if (isTeacher) {
+      return <Chip label="Faculty Mode" size="small" color="secondary" />;
+    }
+    if (isEnrolled || enrollmentStatus === 'ENROLLED') {
+      return (
+        <Chip
+          icon={<CheckCircleIcon />}
+          label="Enrolled"
+          size="small"
+          color="success"
+          sx={{ fontWeight: 600 }}
+        />
+      );
+    }
+    if (enrollmentStatus === 'PENDING') {
+      return (
+        <Chip
+          label="Pending Approval"
+          size="small"
+          color="warning"
+          sx={{ fontWeight: 600 }}
+        />
+      );
+    }
+    if (enrollmentStatus === 'REJECTED') {
+      return (
+        <Chip
+          label="Rejected"
+          size="small"
+          color="error"
+          sx={{ fontWeight: 600 }}
+        />
+      );
+    }
+    return (
+      <Chip
+        icon={<LockIcon />}
+        label="Not Enrolled"
+        size="small"
+        sx={{ fontWeight: 600, bgcolor: 'grey.300' }}
+      />
+    );
   };
 
   return (
@@ -34,25 +75,7 @@ export default function ExamCard({ exam }) {
         <Box sx={{ position: 'relative' }}>
           <CardMedia component="img" height="140" image={defaultImg} alt="Exam" />
           <Box sx={{ position: 'absolute', top: 10, right: 10 }}>
-            {isTeacher ? (
-              <Chip label="Faculty Mode" size="small" color="secondary" />
-            ) : isEnrolled ? (
-              <Chip
-                icon={<CheckCircleIcon />}
-                label="Enrolled"
-                size="small"
-                color="success"
-                sx={{ fontWeight: 600 }}
-              />
-            ) : (
-              <Chip
-                icon={<LockIcon />}
-                label="Requires Enrollment"
-                size="small"
-                color="warning"
-                sx={{ fontWeight: 600 }}
-              />
-            )}
+            {getStatusChip()}
           </Box>
         </Box>
 

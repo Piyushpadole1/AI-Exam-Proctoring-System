@@ -24,6 +24,8 @@ public class ExamResponse {
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private String status;
+    private Boolean hasCodingRound = false;
+    private Double codingMarks = 0.0;
 
     public ExamResponse() {
     }
@@ -39,6 +41,8 @@ public class ExamResponse {
         this.totalQuestions = exam.getTotalQuestions();
         this.totalMarks = exam.getTotalMarks();
         this.passingMarks = exam.getPassingMarks();
+        this.hasCodingRound = exam.getHasCodingRound() != null ? exam.getHasCodingRound() : false;
+        this.codingMarks = exam.getCodingMarks() != null ? exam.getCodingMarks() : 0.0;
         this.enrollmentPolicy = exam.getEnrollmentPolicy();
         this.teacherName = exam.getTeacher() != null ? exam.getTeacher().getName() : null;
         this.teacherId = exam.getTeacher() != null ? exam.getTeacher().getId() : null;
@@ -192,5 +196,21 @@ public class ExamResponse {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public Boolean getHasCodingRound() {
+        return hasCodingRound != null ? hasCodingRound : false;
+    }
+
+    public void setHasCodingRound(Boolean hasCodingRound) {
+        this.hasCodingRound = hasCodingRound != null ? hasCodingRound : false;
+    }
+
+    public Double getCodingMarks() {
+        return codingMarks != null ? codingMarks : 0.0;
+    }
+
+    public void setCodingMarks(Double codingMarks) {
+        this.codingMarks = codingMarks != null ? codingMarks : 0.0;
     }
 }

@@ -13,6 +13,7 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 // Cheating Log Provider
 import { CheatingLogProvider } from './context/CheatingLogContext';
+import ErrorBoundary from './components/shared/ErrorBoundary';
 
 function App() {
   const theme = baselightTheme;
@@ -20,9 +21,11 @@ function App() {
     <ThemeProvider theme={theme}>
       <Provider store={store}>
         <CheatingLogProvider>
-          <ToastContainer />
-          <CssBaseline />
-          <RouterProvider router={Router} />
+          <ErrorBoundary>
+            <ToastContainer />
+            <CssBaseline />
+            <RouterProvider router={Router} />
+          </ErrorBoundary>
         </CheatingLogProvider>
       </Provider>
     </ThemeProvider>

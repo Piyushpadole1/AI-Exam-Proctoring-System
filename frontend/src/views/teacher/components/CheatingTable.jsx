@@ -75,18 +75,6 @@ export default function CheatingTable() {
     setSelectedLog(null);
   };
 
-  const getViolationColor = (count) => {
-    if (count > 5) return 'error';
-    if (count > 2) return 'warning';
-    return 'success';
-  };
-
-  const getViolationIcon = (count) => {
-    if (count > 5) return <WarningIcon color="error" />;
-    if (count > 2) return <WarningIcon color="warning" />;
-    return null;
-  };
-
   if (examsLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
@@ -156,75 +144,107 @@ export default function CheatingTable() {
       ) : (
         <TableContainer component={Paper}>
           <Table>
-            <TableHead>
+            <TableHead sx={{ bgcolor: 'grey.100' }}>
               <TableRow>
-                <TableCell>Sno</TableCell>
-                <TableCell>Name</TableCell>
-                <TableCell>Email</TableCell>
-                <TableCell>No Face Count</TableCell>
-                <TableCell>Multiple Face Count</TableCell>
-                <TableCell>Cell Phone Count</TableCell>
-                <TableCell>Prohibited Object Count</TableCell>
-                <TableCell>Screenshots</TableCell>
+                <TableCell><strong>Sno</strong></TableCell>
+                <TableCell><strong>Name</strong></TableCell>
+                <TableCell><strong>Email</strong></TableCell>
+                <TableCell align="center"><strong>Total Violations</strong></TableCell>
+                <TableCell align="center"><strong>Fairness Score</strong></TableCell>
+                <TableCell align="center"><strong>Cell Phone</strong></TableCell>
+                <TableCell align="center"><strong>No Face</strong></TableCell>
+                <TableCell align="center"><strong>Multiple Faces</strong></TableCell>
+                <TableCell align="center"><strong>Prohibited Objects</strong></TableCell>
+                <TableCell align="center"><strong>Evidence</strong></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {filteredUsers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center">
-                    No cheating logs found for this exam
+                  <TableCell colSpan={10} align="center">
+                    No student cheating records or violations found for this exam.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredUsers.map((log, index) => (
-                  <TableRow key={index}>
-                    <TableCell>{index + 1}</TableCell>
-                    <TableCell>{log.username}</TableCell>
-                    <TableCell>{log.email}</TableCell>
-                    <TableCell>
-                      <Chip
-                        icon={getViolationIcon(log.noFaceCount)}
-                        label={log.noFaceCount}
-                        color={getViolationColor(log.noFaceCount)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        icon={getViolationIcon(log.multipleFaceCount)}
-                        label={log.multipleFaceCount}
-                        color={getViolationColor(log.multipleFaceCount)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        icon={getViolationIcon(log.cellPhoneCount)}
-                        label={log.cellPhoneCount}
-                        color={getViolationColor(log.cellPhoneCount)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        icon={getViolationIcon(log.prohibitedObjectCount)}
-                        label={log.prohibitedObjectCount}
-                        color={getViolationColor(log.prohibitedObjectCount)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Tooltip title="View Screenshots">
-                        <IconButton
-                          onClick={() => handleViewScreenshots(log)}
-                          disabled={!log.screenshots?.length}
-                        >
-                          <ImageIcon color={log.screenshots?.length ? 'primary' : 'disabled'} />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))
+                filteredUsers.map((log, index) => {
+                  const totalV = log.totalViolations ?? (
+                    (log.noFaceCount || 0) +
+                    (log.multipleFaceCount || 0) +
+                    (log.cellPhoneCount || 0) +
+                    (log.prohibitedObjectCount || 0)
+                  );
+                  const fairness = log.fairnessScore ?? Math.max(0, 100 - (totalV * 15));
+                  return (
+                    <TableRow key={index} hover>
+                      <TableCell>{index + 1}</TableCell>
+                      <TableCell>
+                        <Typography variant="subtitle2" fontWeight="600">
+                          {log.username || 'Student'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{log.email}</TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={totalV}
+                          color={totalV >= 6 ? 'error' : totalV > 0 ? 'warning' : 'success'}
+                          size="small"
+                          sx={{ fontWeight: 'bold' }}
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={`${fairness}%`}
+                          color={fairness >= 80 ? 'success' : fairness >= 50 ? 'warning' : 'error'}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontWeight: 'bold' }}
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={log.cellPhoneCount || 0}
+                          color={log.cellPhoneCount > 0 ? 'error' : 'default'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={log.noFaceCount || 0}
+                          color={log.noFaceCount > 0 ? 'warning' : 'default'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={log.multipleFaceCount || 0}
+                          color={log.multipleFaceCount > 0 ? 'warning' : 'default'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={log.prohibitedObjectCount || 0}
+                          color={log.prohibitedObjectCount > 0 ? 'warning' : 'default'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Tooltip title={log.screenshots?.length ? `View ${log.screenshots.length} Screenshots` : 'No evidence captured'}>
+                          <span>
+                            <IconButton
+                              onClick={() => handleViewScreenshots(log)}
+                              disabled={!log.screenshots?.length}
+                              color={log.screenshots?.length ? 'primary' : 'default'}
+                              size="small"
+                            >
+                              <ImageIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
