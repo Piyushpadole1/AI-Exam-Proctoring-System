@@ -180,13 +180,21 @@ public class AdminController {
                 .count();
 
         // Total violations from both cheatingLogs and proctoring_events
-        long eventViolationsCount = eventRepository.findAll().stream()
-                .filter(ev -> ev.getSession() != null && ev.getSession().getAttempt() != null &&
+        long eventViolationsCount = 0;
+        try {
+            for (ProctoringEvent ev : eventRepository.findAll()) {
+                try {
+                    if (ev.getSession() != null && ev.getSession().getAttempt() != null &&
+                        ev.getSession().getAttempt().getExam() != null &&
                         allowedExamIds.contains(ev.getSession().getAttempt().getExam().getId()) &&
                         !"EXAM_STARTED".equalsIgnoreCase(ev.getEventType()) &&
                         !"QUESTION_ANSWERED".equalsIgnoreCase(ev.getEventType()) &&
-                        !"EXAM_SUBMITTED".equalsIgnoreCase(ev.getEventType()))
-                .count();
+                        !"EXAM_SUBMITTED".equalsIgnoreCase(ev.getEventType())) {
+                        eventViolationsCount++;
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
         long finalViolations = Math.max(totalViolations, eventViolationsCount);
 
         Map<String, Object> stats = new HashMap<>();

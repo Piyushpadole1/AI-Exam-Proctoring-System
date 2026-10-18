@@ -112,13 +112,15 @@ public class ExamAttemptService {
             throw new ExamAccessException("Access Denied: Your enrollment status is " + enrollment.getStatus() + ". Only approved students may take the exam.");
         }
 
-        // GATEKEEPER 2.5: Prevent multiple submissions / retakes of the same exam
+        // GATEKEEPER 2.5: Prevent multiple submissions / retakes of the same exam unless re-enrolled by teacher
         List<ExamAttempt> pastAttempts = attemptRepository.findByExamIdAndStudentId(exam.getId(), student.getId());
+        LocalDateTime reEnrolledAt = enrollment.getEnrolledAt() != null ? enrollment.getEnrolledAt() : LocalDateTime.MIN;
         boolean alreadySubmitted = pastAttempts.stream().anyMatch(a ->
-                a.getStatus() == AttemptStatus.SUBMITTED ||
-                a.getStatus() == AttemptStatus.COMPLETED ||
-                a.getStatus() == AttemptStatus.DISQUALIFIED ||
-                a.getStatus() == AttemptStatus.AUTO_SUBMITTED);
+                (a.getStatus() == AttemptStatus.SUBMITTED ||
+                 a.getStatus() == AttemptStatus.COMPLETED ||
+                 a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                 a.getStatus() == AttemptStatus.AUTO_SUBMITTED) &&
+                (a.getSubmittedAt() == null || !a.getSubmittedAt().isBefore(reEnrolledAt)));
         if (alreadySubmitted) {
             throw new ExamAccessException("Access Denied: You have already completed and submitted this examination. Multiple attempts are not permitted.");
         }

@@ -1891,11 +1891,13 @@ public class LegacyExamSessionController {
             }
 
             List<ExamAttempt> pastAttempts = attemptRepository.findByExamIdAndStudentId(exam.getId(), resolved.getId());
+            LocalDateTime reEnrolledAt = enrollment.getEnrolledAt() != null ? enrollment.getEnrolledAt() : LocalDateTime.MIN;
             boolean alreadySubmitted = pastAttempts.stream().anyMatch(a ->
-                    a.getStatus() == AttemptStatus.SUBMITTED ||
-                    a.getStatus() == AttemptStatus.COMPLETED ||
-                    a.getStatus() == AttemptStatus.DISQUALIFIED ||
-                    a.getStatus() == AttemptStatus.AUTO_SUBMITTED);
+                    (a.getStatus() == AttemptStatus.SUBMITTED ||
+                     a.getStatus() == AttemptStatus.COMPLETED ||
+                     a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                     a.getStatus() == AttemptStatus.AUTO_SUBMITTED) &&
+                    (a.getSubmittedAt() == null || !a.getSubmittedAt().isBefore(reEnrolledAt)));
             if (alreadySubmitted) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
                         "error", "Access Denied: You have already completed and submitted this examination. Multiple attempts are not permitted.",
@@ -2085,7 +2087,7 @@ public class LegacyExamSessionController {
         return ResponseEntity.ok(result);
     }
 
-    @PostMapping("/api/users/exam/{examCode}/approve-student/{studentId}")
+    @PostMapping({"/api/users/exam/{examCode}/approve-student/{studentId}", "/api/users/exam/{examCode}/enrollment/{studentId}/approve"})
     public ResponseEntity<Map<String, Object>> approveStudent(
             @PathVariable String examCode,
             @PathVariable Long studentId,
@@ -2120,6 +2122,9 @@ public class LegacyExamSessionController {
         en.setStatus(EnrollmentStatus.ENROLLED);
         en.setEnrolledBy(teacher);
         en.setEnrolledAt(LocalDateTime.now());
+        if (en.getAttemptsUsed() >= en.getAttemptLimit()) {
+            en.setAttemptLimit(en.getAttemptsUsed() + 1);
+        }
         enrollmentRepository.save(en);
 
         return ResponseEntity.ok(Map.of("success", true, "message", "Student approved successfully."));
