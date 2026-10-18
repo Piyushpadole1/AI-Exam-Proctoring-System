@@ -33,7 +33,7 @@ import {
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SendIcon from '@mui/icons-material/Send';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
-import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -42,76 +42,34 @@ import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 import { useNavigate, useParams } from 'react-router';
 import { useCheatingLog } from 'src/context/CheatingLogContext';
+import AudioMonitor from './Components/AudioMonitor';
 
 const STARTER_TEMPLATES = {
-  javascript: `// JavaScript (Node.js)
-// Read input using readline or process.argv if required
-function solution(input) {
-    // Write your code here
-    return input;
-}
-
-// Example execution
-const fs = require('fs');
-try {
-    const input = fs.readFileSync(0, 'utf-8').trim();
-    if (input) console.log(solution(input));
-} catch (e) {
-    console.log(solution(""));
-}
+  javascript: `// JavaScript (Node.js) - Write your code from scratch
 `,
-  python: `# Python 3
-import sys
-
-def solution(data):
-    # Write your solution here
-    return data
-
-if __name__ == "__main__":
-    raw_input = sys.stdin.read().strip()
-    if raw_input:
-        print(solution(raw_input))
+  python: `# Python 3 - Write your code from scratch
 `,
-  java: `// Java 21
-import java.util.Scanner;
-
+  java: `// Java 21 - Write your code from scratch
 public class Solution {
     public static void main(String[] args) {
-        Scanner scanner = new Scanner(System.in);
-        if (scanner.hasNextLine()) {
-            String input = scanner.nextLine();
-            // Process input
-            System.out.println(input);
-        }
-        scanner.close();
+        // Write your code here
     }
 }
 `,
-  c: `// C (GCC)
+  c: `// C (GCC) - Write your code from scratch
 #include <stdio.h>
-#include <string.h>
 
 int main() {
-    char input[1024];
-    if (fgets(input, sizeof(input), stdin)) {
-        // Process input
-        printf("%s", input);
-    }
+    // Write your code here
     return 0;
 }
 `,
-  cpp: `// C++ (G++)
+  cpp: `// C++ (G++) - Write your code from scratch
 #include <iostream>
-#include <string>
-
 using namespace std;
 
 int main() {
-    string input;
-    if (getline(cin, input)) {
-        // Process input
-        cout << input << endl;
-    }
+    // Write your code here
     return 0;
 }
 `,
@@ -149,6 +107,14 @@ export default function Coder() {
   const lastViolationTime = useRef({});
   const webcamRef = useRef(null);
 
+  // Timer & Code Tracking State
+  const [timeLeft, setTimeLeft] = useState(null);
+  const startTimeRef = useRef(Date.now());
+  const codeRef = useRef(code);
+  useEffect(() => {
+    codeRef.current = code;
+  }, [code]);
+
   // Fetch Exam and Coding Question
   useEffect(() => {
     const fetchData = async () => {
@@ -176,6 +142,16 @@ export default function Coder() {
           const defaultLang = q.language && STARTER_TEMPLATES[q.language] ? q.language : 'javascript';
           setLanguage(defaultLang);
           setCode(STARTER_TEMPLATES[defaultLang]);
+
+          // Set problem countdown duration (in seconds)
+          let durationSec = 1800; // default 30 mins
+          if (q.timeLimitMinutes && q.timeLimitMinutes > 0) {
+            durationSec = q.timeLimitMinutes * 60;
+          } else if (examData?.durationMinutes && examData.durationMinutes > 0) {
+            durationSec = examData.durationMinutes * 60;
+          }
+          setTimeLeft(durationSec);
+          startTimeRef.current = Date.now();
         }
       } catch (err) {
         console.error('Failed to load coding round data:', err);
@@ -337,13 +313,50 @@ export default function Coder() {
     }
   };
 
-  // Reset Code
-  const handleResetCode = () => {
-    if (STARTER_TEMPLATES[language]) {
-      setCode(STARTER_TEMPLATES[language]);
-      toast.info('Editor reset to starter template');
+  // Problem countdown timer & Auto-submit
+  const handleAutoSubmitOnExpiry = useCallback(async () => {
+    toast.warning('Time limit expired! Automatically submitting your solution...');
+    try {
+      const elapsedSeconds = Math.max(1, Math.round((Date.now() - (startTimeRef.current || Date.now())) / 1000));
+      const currentCode = codeRef.current || '';
+      await axiosInstance.post(
+        '/api/coding/submit',
+        {
+          code: currentCode,
+          language,
+          examId,
+          questionId: questionId || (question ? question._id : null),
+          runOnly: false,
+          timeTakenSeconds: elapsedSeconds,
+        },
+        { withCredentials: true }
+      );
+      toast.info('Time expired: Solution auto-submitted.');
+      navigate('/result');
+    } catch (e) {
+      console.warn('Auto submit failed on timer expiry:', e);
+      navigate('/result');
     }
-  };
+  }, [examId, questionId, question, language, navigate]);
+
+  useEffect(() => {
+    if (timeLeft === null || isDisqualified) return;
+    if (timeLeft <= 0) {
+      handleAutoSubmitOnExpiry();
+      return;
+    }
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          handleAutoSubmitOnExpiry();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [timeLeft, isDisqualified, handleAutoSubmitOnExpiry]);
 
   // Run Code (Sample Test Cases)
   const handleRunCode = async () => {
@@ -351,6 +364,7 @@ export default function Coder() {
     setActiveConsoleTab(0);
     setConsoleOutput('Executing code against sample test cases in secure sandbox...');
 
+    const elapsedSeconds = Math.max(1, Math.round((Date.now() - (startTimeRef.current || Date.now())) / 1000));
     try {
       const payload = {
         code,
@@ -359,6 +373,7 @@ export default function Coder() {
         questionId: questionId || (question ? question._id : null),
         input: customInput || null,
         runOnly: true,
+        timeTakenSeconds: elapsedSeconds,
       };
 
       const res = await axiosInstance.post('/api/coding/run', payload, { withCredentials: true });
@@ -387,18 +402,22 @@ export default function Coder() {
   };
 
   // Submit Solution (All Test Cases + Scoring + Academic Score Update)
-  const handleSubmitSolution = async () => {
+  const handleSubmitSolution = async (isAutoSubmit = false) => {
     setIsSubmitting(true);
     setActiveConsoleTab(0);
-    setConsoleOutput('Submitting solution against all test cases (sample + hidden)...');
+    setConsoleOutput(isAutoSubmit ? 'Auto-submitting solution on time expiry...' : 'Submitting solution against all test cases (sample + hidden)...');
+
+    const elapsedSeconds = Math.max(1, Math.round((Date.now() - (startTimeRef.current || Date.now())) / 1000));
+    const currentCode = codeRef.current || code;
 
     try {
       const payload = {
-        code,
+        code: currentCode,
         language,
         examId,
         questionId: questionId || (question ? question._id : null),
         runOnly: false,
+        timeTakenSeconds: elapsedSeconds,
       };
 
       const res = await axiosInstance.post('/api/coding/submit', payload, { withCredentials: true });
@@ -491,6 +510,17 @@ export default function Coder() {
         </Box>
 
         <Box display="flex" alignItems="center" gap={2}>
+          {/* Problem Countdown Timer */}
+          <Chip
+            icon={<AccessTimeIcon sx={{ color: '#fff !important' }} />}
+            label={`Time Left: ${Math.floor((timeLeft || 0) / 60)
+              .toString()
+              .padStart(2, '0')}:${((timeLeft || 0) % 60).toString().padStart(2, '0')}`}
+            color={timeLeft !== null && timeLeft < 300 ? 'error' : timeLeft !== null && timeLeft < 600 ? 'warning' : 'primary'}
+            size="small"
+            sx={{ fontWeight: 'bold' }}
+          />
+
           {/* Proctoring Status Pill */}
           <Chip
             icon={<ShieldIcon />}
@@ -652,6 +682,10 @@ export default function Coder() {
               webcamRef={webcamRef}
               onViolation={handleWebCamViolation}
             />
+            <AudioMonitor
+              onViolation={handleWebCamViolation}
+              isActive={!isDisqualified}
+            />
           </Box>
 
           {/* Editor Header Bar */}
@@ -685,16 +719,6 @@ export default function Coder() {
                 <MenuItem value="cpp">C++ (G++)</MenuItem>
               </Select>
             </FormControl>
-
-            <Button
-              size="small"
-              variant="text"
-              startIcon={<RestartAltIcon />}
-              onClick={handleResetCode}
-              sx={{ color: '#aaa', textTransform: 'none' }}
-            >
-              Reset Starter Code
-            </Button>
 
             <Button
               size="small"

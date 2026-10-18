@@ -46,7 +46,7 @@ public class ScoringEngineService {
     );
 
     public int getPenaltyPoints(String eventType) {
-        return PENALTIES.getOrDefault(eventType, 5);
+        return 1;
     }
 
     public ViolationSeverity getSeverity(String eventType) {

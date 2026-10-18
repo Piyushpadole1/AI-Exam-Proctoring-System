@@ -18,8 +18,14 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.aieval8.examproctoring.entity.*;
+import com.aieval8.examproctoring.repository.*;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping({"/api/student", "/api/students"})
@@ -28,10 +34,29 @@ public class StudentController {
 
     private final EnrollmentService enrollmentService;
     private final ExamAttemptService attemptService;
+    private final UserRepository userRepository;
+    private final ExamRepository examRepository;
+    private final ExamAttemptRepository attemptRepository;
+    private final ExamEnrollmentRepository enrollmentRepository;
+    private final ProctoringSessionRepository sessionRepository;
+    private final ProctoringEventRepository eventRepository;
 
-    public StudentController(EnrollmentService enrollmentService, ExamAttemptService attemptService) {
+    public StudentController(EnrollmentService enrollmentService,
+                             ExamAttemptService attemptService,
+                             UserRepository userRepository,
+                             ExamRepository examRepository,
+                             ExamAttemptRepository attemptRepository,
+                             ExamEnrollmentRepository enrollmentRepository,
+                             ProctoringSessionRepository sessionRepository,
+                             ProctoringEventRepository eventRepository) {
         this.enrollmentService = enrollmentService;
         this.attemptService = attemptService;
+        this.userRepository = userRepository;
+        this.examRepository = examRepository;
+        this.attemptRepository = attemptRepository;
+        this.enrollmentRepository = enrollmentRepository;
+        this.sessionRepository = sessionRepository;
+        this.eventRepository = eventRepository;
     }
 
     private CustomUserDetails resolveStudent(CustomUserDetails principal) {
@@ -72,6 +97,45 @@ public class StudentController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/active-attempt/{examCode}")
+    public ResponseEntity<Map<String, Object>> getActiveAttempt(
+            @PathVariable String examCode,
+            @AuthenticationPrincipal CustomUserDetails studentDetails) {
+        CustomUserDetails resolved = resolveStudent(studentDetails);
+        Exam exam = examRepository.findByExamCode(examCode.trim().toUpperCase())
+                .or(() -> examRepository.findByExamCode(examCode.trim()))
+                .or(() -> {
+                    try {
+                        return examRepository.findById(Long.parseLong(examCode.trim()));
+                    } catch (Exception e) {
+                        return Optional.empty();
+                    }
+                })
+                .orElse(null);
+
+        if (exam == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        List<ExamAttempt> attempts = attemptRepository.findByExamIdAndStudentId(exam.getId(), resolved.getId());
+        ExamAttempt active = attempts.stream()
+                .filter(a -> a.getStatus() == AttemptStatus.IN_PROGRESS)
+                .findFirst()
+                .or(() -> attempts.isEmpty() ? Optional.empty() : Optional.of(attempts.get(attempts.size() - 1)))
+                .orElse(null);
+
+        if (active == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Map<String, Object> res = new HashMap<>();
+        res.put("attemptId", active.getId());
+        res.put("id", active.getId());
+        res.put("status", active.getStatus().name());
+        res.put("examId", exam.getExamCode());
+        return ResponseEntity.ok(res);
+    }
+
     @PutMapping("/attempts/{attemptId}/autosave")
     public ResponseEntity<Void> autosaveAnswers(
             @PathVariable Long attemptId,
@@ -87,6 +151,147 @@ public class StudentController {
             @RequestBody SaveAnswersRequest request,
             @AuthenticationPrincipal CustomUserDetails studentDetails) {
         AttemptResponse response = attemptService.submitAttempt(attemptId, request.getAnswers(), resolveStudent(studentDetails));
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/dashboard")
+    public ResponseEntity<Map<String, Object>> getStudentDashboard(
+            @AuthenticationPrincipal CustomUserDetails studentDetails) {
+        CustomUserDetails resolved = resolveStudent(studentDetails);
+        User student = userRepository.findById(resolved.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Student not found"));
+
+        List<ExamEnrollment> enrollments = enrollmentRepository.findByStudentId(student.getId());
+        List<ExamAttempt> attempts = attemptRepository.findByStudentId(student.getId());
+        List<Exam> publishedExams = examRepository.findByStatus("PUBLISHED");
+
+        long enrolledExamsCount = enrollments.stream()
+                .filter(e -> e.getStatus() == EnrollmentStatus.ENROLLED)
+                .count();
+
+        long eligibleExamsCount = publishedExams.size();
+
+        LocalDateTime now = LocalDateTime.now();
+        long upcomingExamsCount = enrollments.stream()
+                .filter(e -> e.getStatus() == EnrollmentStatus.ENROLLED)
+                .filter(e -> e.getExam() != null && (
+                        (e.getExam().getStartTime() != null && e.getExam().getStartTime().isAfter(now)) ||
+                        (e.getExam().getExamDate() != null && e.getExam().getExamDate().isAfter(now))
+                ))
+                .count();
+
+        long examsAppearedCount = attempts.size();
+
+        List<ExamAttempt> completedAttempts = attempts.stream()
+                .filter(a -> a.getStatus() == AttemptStatus.SUBMITTED ||
+                             a.getStatus() == AttemptStatus.COMPLETED ||
+                             a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                             a.getStatus() == AttemptStatus.AUTO_SUBMITTED)
+                .toList();
+
+        long examsCompletedCount = completedAttempts.size();
+
+        double averageScore = completedAttempts.isEmpty() ? 0.0 :
+                completedAttempts.stream()
+                        .mapToDouble(a -> a.getPercentage() != null ? a.getPercentage() : 0.0)
+                        .average()
+                        .orElse(0.0);
+        averageScore = Math.round(averageScore * 10.0) / 10.0;
+
+        long passCount = completedAttempts.stream()
+                .filter(a -> Boolean.TRUE.equals(a.getPassed()))
+                .count();
+
+        long failCount = completedAttempts.stream()
+                .filter(a -> Boolean.FALSE.equals(a.getPassed()))
+                .count();
+
+        long totalViolations = 0;
+        for (ExamAttempt a : attempts) {
+            Optional<ProctoringSession> sessOpt = sessionRepository.findByAttemptId(a.getId());
+            if (sessOpt.isPresent()) {
+                totalViolations += eventRepository.countBySessionId(sessOpt.get().getId());
+            }
+        }
+
+        List<Map<String, Object>> recentResults = new ArrayList<>();
+        List<ExamAttempt> sortedCompleted = new ArrayList<>(completedAttempts);
+        sortedCompleted.sort((a, b) -> {
+            LocalDateTime t1 = a.getSubmittedAt() != null ? a.getSubmittedAt() : a.getStartedAt();
+            LocalDateTime t2 = b.getSubmittedAt() != null ? b.getSubmittedAt() : b.getStartedAt();
+            if (t1 == null && t2 == null) return 0;
+            if (t1 == null) return 1;
+            if (t2 == null) return -1;
+            return t2.compareTo(t1);
+        });
+
+        int limit = Math.min(sortedCompleted.size(), 6);
+        for (int i = 0; i < limit; i++) {
+            ExamAttempt a = sortedCompleted.get(i);
+            Map<String, Object> r = new HashMap<>();
+            r.put("attemptId", a.getId());
+            r.put("examId", a.getExam() != null ? a.getExam().getExamCode() : "");
+            r.put("examName", a.getExam() != null ? a.getExam().getExamName() : "Exam");
+            r.put("subject", a.getExam() != null ? a.getExam().getSubject() : "");
+            r.put("score", a.getScore());
+            r.put("totalMarks", a.getExam() != null ? a.getExam().getTotalMarks() : 100.0);
+            r.put("passingMarks", a.getExam() != null ? a.getExam().getPassingMarks() : 40.0);
+            r.put("percentage", a.getPercentage());
+            r.put("passed", a.getPassed());
+            r.put("status", a.getStatus().name());
+            r.put("submittedAt", a.getSubmittedAt() != null ? a.getSubmittedAt().toString() : (a.getStartedAt() != null ? a.getStartedAt().toString() : ""));
+
+            long vCount = 0;
+            Optional<ProctoringSession> sess = sessionRepository.findByAttemptId(a.getId());
+            if (sess.isPresent()) {
+                vCount = eventRepository.countBySessionId(sess.get().getId());
+            }
+            r.put("violationsCount", vCount);
+            recentResults.add(r);
+        }
+
+        List<Map<String, Object>> upcomingExams = new ArrayList<>();
+        for (ExamEnrollment en : enrollments) {
+            if (en.getStatus() == EnrollmentStatus.ENROLLED && en.getExam() != null) {
+                Exam ex = en.getExam();
+                Map<String, Object> ue = new HashMap<>();
+                ue.put("examId", ex.getExamCode());
+                ue.put("examName", ex.getExamName());
+                ue.put("subject", ex.getSubject());
+                ue.put("duration", ex.getDurationMinutes());
+                ue.put("totalMarks", ex.getTotalMarks());
+                ue.put("passingMarks", ex.getPassingMarks());
+                ue.put("hasCodingRound", ex.getHasCodingRound());
+                ue.put("examDate", ex.getExamDate() != null ? ex.getExamDate().toString() : null);
+                ue.put("startTime", ex.getStartTime() != null ? ex.getStartTime().toString() : null);
+                ue.put("status", en.getStatus().name());
+                upcomingExams.add(ue);
+            }
+        }
+
+        Map<String, Object> profile = new HashMap<>();
+        profile.put("id", student.getId());
+        profile.put("name", student.getName());
+        profile.put("email", student.getEmail());
+        profile.put("studentId", student.getStudentIdNumber() != null ? student.getStudentIdNumber() : "N/A");
+        profile.put("institution", student.getClient() != null ? student.getClient().getName() : "Evaluation Portal");
+        profile.put("role", "student");
+        profile.put("joinedAt", student.getCreatedAt() != null ? student.getCreatedAt().toString() : "");
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("student", profile);
+        response.put("enrolledExamsCount", enrolledExamsCount);
+        response.put("eligibleExamsCount", eligibleExamsCount);
+        response.put("upcomingExamsCount", upcomingExamsCount);
+        response.put("examsAppearedCount", examsAppearedCount);
+        response.put("examsCompletedCount", examsCompletedCount);
+        response.put("averageScore", averageScore);
+        response.put("passCount", passCount);
+        response.put("failCount", failCount);
+        response.put("totalViolations", totalViolations);
+        response.put("recentResults", recentResults);
+        response.put("upcomingExams", upcomingExams);
+
         return ResponseEntity.ok(response);
     }
 }

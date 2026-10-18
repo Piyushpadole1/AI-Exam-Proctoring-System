@@ -97,6 +97,11 @@ const DescriptionAndInstructions = () => {
       toast.error('Exam not found.');
       return;
     }
+    if (currentStatus === 'COMPLETED' || exam?.isCompleted || exam?.hasAttempted) {
+      toast.info('You have already completed this examination.');
+      navigate('/result');
+      return;
+    }
     if (!isEnrolled) {
       toast.error('Access Denied: You are not enrolled in this exam.');
       return;
@@ -251,7 +256,25 @@ const DescriptionAndInstructions = () => {
           </Box>
         )}
 
-        {!isTeacher && currentStatus === 'PENDING' ? (
+        {!isTeacher && (currentStatus === 'COMPLETED' || exam?.isCompleted || exam?.hasAttempted) ? (
+          <Alert
+            severity="info"
+            sx={{ mb: 3 }}
+            action={
+              <Button
+                color="primary"
+                variant="contained"
+                size="small"
+                onClick={() => navigate('/result')}
+                sx={{ fontWeight: 700 }}
+              >
+                View My Result
+              </Button>
+            }
+          >
+            <strong>Exam Completed:</strong> You have already submitted this examination. Multiple attempts are not permitted. You can view your detailed report on the Results page.
+          </Alert>
+        ) : !isTeacher && currentStatus === 'PENDING' ? (
           <Alert severity="warning" sx={{ mb: 3 }}>
             <strong>Enrollment Pending:</strong> Your request to take this exam has been submitted and is currently pending approval by the instructor. You will be able to start once approved.
           </Alert>
@@ -285,35 +308,49 @@ const DescriptionAndInstructions = () => {
         )}
 
         <Stack direction="column" alignItems="center" spacing={2} mt={2}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={certify}
-                onChange={() => setCertify(!certify)}
-                color="primary"
-                disabled={!isEnrolled}
-              />
-            }
-            label="I certify that I have read the instructions and agree to automated AI proctoring."
-          />
+          {!(currentStatus === 'COMPLETED' || exam?.isCompleted || exam?.hasAttempted) && (
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={certify}
+                  onChange={() => setCertify(!certify)}
+                  color="primary"
+                  disabled={!isEnrolled}
+                />
+              }
+              label="I certify that I have read the instructions and agree to automated AI proctoring."
+            />
+          )}
 
-          {!hasConfiguredQuestions && (
+          {!hasConfiguredQuestions && !(currentStatus === 'COMPLETED' || exam?.isCompleted || exam?.hasAttempted) && (
             <Alert severity="warning" sx={{ width: '100%' }}>
               This exam has no questions configured yet. Please contact your teacher before starting.
             </Alert>
           )}
 
-          <Button
-            variant="contained"
-            color="primary"
-            size="large"
-            disabled={!certify || !isEnrolled || !hasConfiguredQuestions}
-            onClick={handleOpenPasswordModal}
-            startIcon={<VerifiedUserIcon />}
-            sx={{ px: 4, py: 1.2, fontWeight: 700 }}
-          >
-            Start Test
-          </Button>
+          {(currentStatus === 'COMPLETED' || exam?.isCompleted || exam?.hasAttempted) ? (
+            <Button
+              variant="contained"
+              color="primary"
+              size="large"
+              onClick={() => navigate('/result')}
+              sx={{ px: 4, py: 1.2, fontWeight: 700 }}
+            >
+              View My Result
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              color="primary"
+              size="large"
+              disabled={!certify || !isEnrolled || !hasConfiguredQuestions}
+              onClick={handleOpenPasswordModal}
+              startIcon={<VerifiedUserIcon />}
+              sx={{ px: 4, py: 1.2, fontWeight: 700 }}
+            >
+              Start Test
+            </Button>
+          )}
         </Stack>
 
         {/* Exam Password Verification Modal */}

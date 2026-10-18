@@ -40,6 +40,13 @@ const AddQuestionForm = () => {
   const [createQuestion] = useCreateQuestionMutation();
   const { data: examsData, isLoading: examsLoading } = useGetExamsQuery();
 
+  const selectedExam = (examsData || []).find(
+    (e) => e.examId === selectedExamId || String(e._id) === String(selectedExamId) || String(e.id) === String(selectedExamId)
+  );
+  const maxQuestions = selectedExam?.totalQuestions || 0;
+  const currentCount = questions.length;
+  const isCapacityReached = maxQuestions > 0 && currentCount >= maxQuestions;
+
   // Pre-select first exam when available
   useEffect(() => {
     if (examsData && examsData.length > 0 && !selectedExamId) {
@@ -86,6 +93,13 @@ const AddQuestionForm = () => {
     if (!selectedExamId) {
       setValidationError('Please select an exam first.');
       toast.error('Please select an exam first.');
+      return;
+    }
+
+    if (isCapacityReached) {
+      const msg = `Cannot add question: Exam question capacity (${maxQuestions}) has been reached.`;
+      setValidationError(msg);
+      toast.error(msg);
       return;
     }
 
@@ -205,9 +219,25 @@ const AddQuestionForm = () => {
       {/* New Question Form Card */}
       <Card variant="outlined" sx={{ mb: 4, bgcolor: '#fafafa', p: 1 }}>
         <CardContent>
-          <Typography variant="h6" fontWeight="600" mb={2}>
-            Add New MCQ Question
-          </Typography>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Typography variant="h6" fontWeight="600">
+              Add New MCQ Question
+            </Typography>
+            {maxQuestions > 0 && (
+              <Chip
+                label={`${currentCount} of ${maxQuestions} questions added`}
+                color={isCapacityReached ? 'error' : 'primary'}
+                variant={isCapacityReached ? 'filled' : 'outlined'}
+                sx={{ fontWeight: 'bold' }}
+              />
+            )}
+          </Box>
+
+          {isCapacityReached && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              <strong>Capacity Reached:</strong> This exam is configured for a maximum of {maxQuestions} question{maxQuestions > 1 ? 's' : ''}. You have added all {currentCount} questions. To add more questions, please increase the total questions limit in the exam settings.
+            </Alert>
+          )}
 
           <TextField
             label="Question Statement"
@@ -219,6 +249,7 @@ const AddQuestionForm = () => {
             rows={3}
             sx={{ mb: 2, bgcolor: '#ffffff' }}
             required
+            disabled={isCapacityReached}
           />
 
           <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
@@ -229,6 +260,7 @@ const AddQuestionForm = () => {
               onChange={(e) => setMarks(Math.max(1, Number(e.target.value)))}
               sx={{ width: 200, bgcolor: '#ffffff' }}
               InputProps={{ inputProps: { min: 1 } }}
+              disabled={isCapacityReached}
             />
           </Stack>
 
@@ -256,6 +288,7 @@ const AddQuestionForm = () => {
                 fullWidth
                 sx={{ bgcolor: '#ffffff' }}
                 required
+                disabled={isCapacityReached}
               />
               <FormControlLabel
                 control={
@@ -263,6 +296,7 @@ const AddQuestionForm = () => {
                     checked={Boolean(correctOptions[idx])}
                     onChange={() => handleOptionCorrectToggle(idx)}
                     color="success"
+                    disabled={isCapacityReached}
                   />
                 }
                 label="Correct"
@@ -276,10 +310,10 @@ const AddQuestionForm = () => {
             color="primary"
             startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <AddCircleOutlineIcon />}
             onClick={handleAddQuestion}
-            disabled={submitting}
+            disabled={submitting || isCapacityReached}
             sx={{ mt: 1, px: 3, py: 1 }}
           >
-            {submitting ? 'Saving Question...' : 'Save Question to Exam'}
+            {submitting ? 'Saving Question...' : isCapacityReached ? 'Exam Capacity Reached' : 'Save Question to Exam'}
           </Button>
         </CardContent>
       </Card>

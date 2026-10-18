@@ -16,8 +16,11 @@ const PROCTORING_CONFIG = {
     COPY_PASTE:          5000,
     KEYBOARD_SHORTCUT:   5000,
     GAZE_DEVIATION:      15000,
+    HEAD_TURNED:         10000,
+    EYE_GAZE_AWAY:       10000,
     BACKGROUND_NOISE:    15000,
     SPEECH_DETECTED:     15000,
+    EXTERNAL_VOICE:      10000,
   },
 
   // AI inference interval (ms)

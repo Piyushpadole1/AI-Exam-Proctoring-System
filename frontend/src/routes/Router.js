@@ -20,6 +20,7 @@ const Success = Loadable(lazy(() => import('../views/Success')));
 
 const TestPage = Loadable(lazy(() => import('./../views/student/TestPage')));
 const ExamPage = Loadable(lazy(() => import('./../views/student/ExamPage')));
+const StudentDashboard = Loadable(lazy(() => import('./../views/student/StudentDashboard')));
 const ExamDetails = Loadable(lazy(() => import('./../views/student/ExamDetails')));
 const CodeDetails = Loadable(lazy(() => import('../views/student/CodeDetails')));
 const ResultPage = Loadable(lazy(() => import('./../views/student/ResultPage')));
@@ -64,14 +65,14 @@ const Router = createBrowserRouter(
     // Every router we create will now go in here as
     // they going to be child of our main App component
     <>
-      {/* Root lands directly on login/register page */}
-      <Route path="/" element={<Navigate to="/auth/login" replace />} />
+      {/* Root lands on role-based dashboard for logged in users, or login for guests */}
+      <Route path="/" element={<RoleBasedRedirect />} />
 
       {/* // Private Routes */}
       <Route path="" element={<PrivateRoute />}>
         {/* // Main layout */}
         <Route element={<FullLayout />}>
-          <Route path="/dashboard" exact={true} element={<ExamPage />} />
+          <Route path="/dashboard" exact={true} element={<StudentDashboard />} />
           <Route path="/sample-page" exact={true} element={<SamplePage />} />
           <Route path="/Success" exact={true} element={<Success />} />
           <Route path="/exam" exact={true} element={<ExamPage />} />

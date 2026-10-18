@@ -69,10 +69,10 @@ public class ExamService {
             }
         }
         if (teacher == null) {
-            teacher = userRepository.findAll().stream()
-                    .filter(u -> u.getRole() == Role.ROLE_TEACHER)
-                    .findFirst()
-                    .orElseThrow(() -> new ResourceNotFoundException("No teacher account found to associate with this exam"));
+            throw new AccessDeniedException("Authentication required. Please log in as a teacher.");
+        }
+        if (teacher.getRole() != Role.ROLE_TEACHER && teacher.getRole() != Role.ROLE_ADMIN) {
+            throw new AccessDeniedException("Access denied: Only teachers can create exams.");
         }
 
         String code = request.getExamCode();
@@ -172,6 +172,9 @@ public class ExamService {
         if (resolved == null || resolved.getId() == null) {
             throw new AccessDeniedException("Authentication required.");
         }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            throw new AccessDeniedException("Access denied: Only teachers can modify exams.");
+        }
         if ("ROLE_TEACHER".equals(resolved.getRole())) {
             if (exam.getTeacher() == null || !exam.getTeacher().getId().equals(resolved.getId())) {
                 throw new AccessDeniedException("Access denied: You do not own this exam.");
@@ -194,6 +197,10 @@ public class ExamService {
             exam.setDurationMinutes(request.getDurationMinutes());
         }
         if (request.getTotalQuestions() != null) {
+            long existingQuestions = questionRepository.countByExamId(examId);
+            if (request.getTotalQuestions() < existingQuestions) {
+                throw new IllegalArgumentException("Cannot reduce total questions to " + request.getTotalQuestions() + " because this exam already has " + existingQuestions + " questions.");
+            }
             exam.setTotalQuestions(request.getTotalQuestions());
         }
         if (request.getTotalMarks() != null) {
@@ -240,6 +247,9 @@ public class ExamService {
 
         if (resolved == null || resolved.getId() == null) {
             throw new AccessDeniedException("Authentication required.");
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            throw new AccessDeniedException("Access denied: Only teachers can delete exams.");
         }
         if ("ROLE_TEACHER".equals(resolved.getRole())) {
             if (exam.getTeacher() == null || !exam.getTeacher().getId().equals(resolved.getId())) {

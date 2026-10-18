@@ -23,7 +23,7 @@ public class ProctoringController {
         this.proctoringService = proctoringService;
     }
 
-    @PostMapping("/events")
+    @PostMapping({"/events", "/event"})
     @PreAuthorize("hasRole('STUDENT')")
     public ResponseEntity<ViolationResponse> logViolation(
             @Valid @RequestBody ViolationEventRequest request,

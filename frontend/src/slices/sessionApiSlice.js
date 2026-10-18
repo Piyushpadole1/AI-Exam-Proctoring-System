@@ -10,6 +10,7 @@ export const sessionApiSlice = apiSlice.injectEndpoints({
         method: 'POST',
         body: data,
       }),
+      invalidatesTags: ['Exam'],
     }),
     getSession: builder.query({
       query: (sessionId) => ({
@@ -30,6 +31,7 @@ export const sessionApiSlice = apiSlice.injectEndpoints({
         method: 'POST',
         body: { answers },
       }),
+      invalidatesTags: ['Exam'],
     }),
     terminateSession: builder.mutation({
       query: ({ sessionId, reason }) => ({
@@ -37,6 +39,7 @@ export const sessionApiSlice = apiSlice.injectEndpoints({
         method: 'POST',
         body: { reason },
       }),
+      invalidatesTags: ['Exam'],
     }),
   }),
 });

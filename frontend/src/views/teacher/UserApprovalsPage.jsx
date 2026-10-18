@@ -75,30 +75,33 @@ const UserApprovalsPage = () => {
   };
 
   // Fetch enrolled students for selected exam
-  const fetchEnrolledStudents = async (examCode) => {
-    if (!examCode) return;
+  const fetchEnrolledStudents = async (examCode, isBackground = false) => {
+    if (!examCode || examCode === 'all') return;
     try {
-      setLoadingEnrollments(true);
+      if (!isBackground) setLoadingEnrollments(true);
       const res = await axiosInstance.get(`/api/users/exam/${examCode}/enrolled-students`);
       setEnrolledStudents(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
-      console.error('Error fetching enrolled students:', err);
+      if (!isBackground) console.error('Error fetching enrolled students:', err);
     } finally {
-      setLoadingEnrollments(false);
+      if (!isBackground) setLoadingEnrollments(false);
     }
   };
 
   // Fetch pending enrollment requests
-  const fetchPendingRequests = async (examCode) => {
+  const fetchPendingRequests = async (examCode, isBackground = false) => {
     if (!examCode) return;
     try {
-      setLoadingPending(true);
-      const res = await axiosInstance.get(`/api/users/exam/${examCode}/enrollment-requests`);
+      if (!isBackground) setLoadingPending(true);
+      const endpoint = examCode === 'all'
+        ? '/api/users/exam/all/enrollment-requests'
+        : `/api/users/exam/${examCode}/enrollment-requests`;
+      const res = await axiosInstance.get(endpoint);
       setPendingRequests(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
-      console.error('Error fetching pending requests:', err);
+      if (!isBackground) console.error('Error fetching pending requests:', err);
     } finally {
-      setLoadingPending(false);
+      if (!isBackground) setLoadingPending(false);
     }
   };
 
@@ -113,12 +116,28 @@ const UserApprovalsPage = () => {
     }
   }, [selectedExamId]);
 
-  const handleApproveStudent = async (studentId, studentName) => {
+  // 3-second auto-polling for real-time pending requests and approvals
+  useEffect(() => {
+    if (!selectedExamId) return;
+    const interval = setInterval(() => {
+      fetchPendingRequests(selectedExamId, true);
+      if (selectedExamId !== 'all') {
+        fetchEnrolledStudents(selectedExamId, true);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [selectedExamId]);
+
+  const handleApproveStudent = async (studentId, studentName, targetExamCode) => {
+    const examCode = targetExamCode || (selectedExamId !== 'all' ? selectedExamId : null);
+    if (!examCode) return;
     try {
       setActionLoading(true);
-      await axiosInstance.post(`/api/users/exam/${selectedExamId}/approve-student/${studentId}`);
+      await axiosInstance.post(`/api/users/exam/${examCode}/approve-student/${studentId}`);
       toast.success(`Approved ${studentName || 'student'} for exam!`);
-      fetchEnrolledStudents(selectedExamId);
+      if (selectedExamId !== 'all') {
+        fetchEnrolledStudents(selectedExamId);
+      }
       fetchPendingRequests(selectedExamId);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to approve student');
@@ -127,12 +146,16 @@ const UserApprovalsPage = () => {
     }
   };
 
-  const handleRejectStudent = async (studentId, studentName) => {
+  const handleRejectStudent = async (studentId, studentName, targetExamCode) => {
+    const examCode = targetExamCode || (selectedExamId !== 'all' ? selectedExamId : null);
+    if (!examCode) return;
     try {
       setActionLoading(true);
-      await axiosInstance.post(`/api/users/exam/${selectedExamId}/reject-student/${studentId}`);
+      await axiosInstance.post(`/api/users/exam/${examCode}/reject-student/${studentId}`);
       toast.info(`Rejected request from ${studentName || 'student'}.`);
-      fetchEnrolledStudents(selectedExamId);
+      if (selectedExamId !== 'all') {
+        fetchEnrolledStudents(selectedExamId);
+      }
       fetchPendingRequests(selectedExamId);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to reject student');
@@ -234,6 +257,9 @@ const UserApprovalsPage = () => {
                   onChange={(e) => setSelectedExamId(e.target.value)}
                   disabled={examsLoading || !exams?.length}
                 >
+                  <MenuItem value="all">
+                    <em>All My Exams (All Pending Requests)</em>
+                  </MenuItem>
                   {(exams || []).map((ex) => (
                     <MenuItem key={ex._id} value={ex.examId}>
                       {ex.examName} ({ex.examId})
@@ -454,6 +480,7 @@ const UserApprovalsPage = () => {
                     <TableRow>
                       <TableCell><strong>Student</strong></TableCell>
                       <TableCell><strong>Email</strong></TableCell>
+                      <TableCell><strong>Exam</strong></TableCell>
                       <TableCell><strong>Roll / Student ID</strong></TableCell>
                       <TableCell><strong>Requested At</strong></TableCell>
                       <TableCell><strong>Status</strong></TableCell>
@@ -476,8 +503,15 @@ const UserApprovalsPage = () => {
                             </Stack>
                           </TableCell>
                           <TableCell>{req.email}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={req.examName ? `${req.examName} (${req.examCode || req.examId})` : (req.examCode || req.examId || selectedExamId)}
+                              size="small"
+                              variant="outlined"
+                            />
+                          </TableCell>
                           <TableCell>{req.studentIdNumber || '—'}</TableCell>
-                          <TableCell>{new Date(req.requestedAt).toLocaleString()}</TableCell>
+                          <TableCell>{req.requestedAt ? new Date(req.requestedAt).toLocaleString() : 'Just now'}</TableCell>
                           <TableCell>
                             <Chip label="PENDING APPROVAL" size="small" color="warning" sx={{ fontWeight: 600 }} />
                           </TableCell>
@@ -488,7 +522,7 @@ const UserApprovalsPage = () => {
                                 color="success"
                                 size="small"
                                 disabled={actionLoading}
-                                onClick={() => handleApproveStudent(req.studentId, req.name)}
+                                onClick={() => handleApproveStudent(req.studentId, req.name, req.examCode || req.examId)}
                               >
                                 Approve
                               </Button>
@@ -497,7 +531,7 @@ const UserApprovalsPage = () => {
                                 color="error"
                                 size="small"
                                 disabled={actionLoading}
-                                onClick={() => handleRejectStudent(req.studentId, req.name)}
+                                onClick={() => handleRejectStudent(req.studentId, req.name, req.examCode || req.examId)}
                               >
                                 Reject
                               </Button>

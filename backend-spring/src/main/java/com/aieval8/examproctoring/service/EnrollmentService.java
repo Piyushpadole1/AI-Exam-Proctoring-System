@@ -77,11 +77,6 @@ public class EnrollmentService {
         User student = userRepository.findById(resolved.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Student account not found"));
 
-        // Multi-client isolation check
-        if (student.getClient() != null && exam.getClient() != null
-                && !Objects.equals(student.getClient().getId(), exam.getClient().getId())) {
-            throw new ExamAccessException("Access Denied: This exam belongs to a different institution.");
-        }
 
         // GATE: Student must already be explicitly authorized/enrolled by the teacher
         ExamEnrollment enrollment = enrollmentRepository.findByExamIdAndStudentId(exam.getId(), student.getId())

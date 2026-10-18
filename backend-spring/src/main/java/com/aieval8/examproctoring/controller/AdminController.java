@@ -72,13 +72,16 @@ public class AdminController {
             @AuthenticationPrincipal CustomUserDetails userDetails) {
 
         CustomUserDetails resolved = resolveUser(userDetails);
-        boolean isTeacher = resolved != null && "ROLE_TEACHER".equals(resolved.getRole());
-        List<Exam> exams;
-        if (isTeacher) {
-            exams = examRepository.findByTeacherId(resolved.getId());
-        } else {
-            exams = examRepository.findAll();
+        if (resolved == null) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
         }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Teacher role required."));
+        }
+        boolean isTeacher = "ROLE_TEACHER".equals(resolved.getRole());
+        List<Exam> exams = isTeacher
+                ? examRepository.findByTeacherId(resolved.getId())
+                : examRepository.findAll();
 
         Set<Long> allowedExamIds = exams.stream().map(Exam::getId).collect(Collectors.toSet());
         Set<String> allowedExamCodes = exams.stream().map(Exam::getExamCode).collect(Collectors.toSet());
@@ -259,7 +262,7 @@ public class AdminController {
             recentSessions.add(sm);
         }
 
-        Map<String, Object> response = new HashMap<>();
+        Map<String, Object> response = new HashMap<>(stats);
         response.put("success", true);
         response.put("stats", stats);
         response.put("recentSessions", recentSessions);
@@ -275,8 +278,15 @@ public class AdminController {
             @AuthenticationPrincipal CustomUserDetails userDetails) {
 
         CustomUserDetails resolved = resolveUser(userDetails);
-        boolean isTeacher = resolved != null && "ROLE_TEACHER".equals(resolved.getRole());
-        List<Exam> exams = isTeacher ? examRepository.findByTeacherId(resolved.getId()) : examRepository.findAll();
+        if (resolved == null) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Teacher role required."));
+        }
+        List<Exam> exams = "ROLE_TEACHER".equals(resolved.getRole())
+                ? examRepository.findByTeacherId(resolved.getId())
+                : examRepository.findAll();
         Set<Long> allowedExamIds = exams.stream().map(Exam::getId).collect(Collectors.toSet());
         Set<String> allowedExamCodes = exams.stream().map(Exam::getExamCode).collect(Collectors.toSet());
 
@@ -463,8 +473,15 @@ public class AdminController {
             @AuthenticationPrincipal CustomUserDetails userDetails) {
 
         CustomUserDetails resolved = resolveUser(userDetails);
-        boolean isTeacher = resolved != null && "ROLE_TEACHER".equals(resolved.getRole());
-        List<Exam> exams = isTeacher ? examRepository.findByTeacherId(resolved.getId()) : examRepository.findAll();
+        if (resolved == null) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).build();
+        }
+        List<Exam> exams = "ROLE_TEACHER".equals(resolved.getRole())
+                ? examRepository.findByTeacherId(resolved.getId())
+                : examRepository.findAll();
         Set<Long> allowedExamIds = exams.stream().map(Exam::getId).collect(Collectors.toSet());
         Set<String> allowedExamCodes = exams.stream().map(Exam::getExamCode).collect(Collectors.toSet());
 
@@ -576,8 +593,11 @@ public class AdminController {
     /**
      * Proctoring report for a given session / attempt
      */
-    @GetMapping({"/api/proctoring/report/{sessionId}", "/api/admin/report/{sessionId}"})
-    public ResponseEntity<Map<String, Object>> getProctoringReport(@PathVariable String sessionId) {
+    @GetMapping({"/api/proctoring/report/{sessionId}", "/api/admin/report/{sessionId}", "/api/admin/proctoring-report/{sessionId}"})
+    public ResponseEntity<Map<String, Object>> getProctoringReport(
+            @PathVariable String sessionId,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        CustomUserDetails resolved = resolveUser(userDetails);
         Long id = null;
         try {
             id = Long.parseLong(sessionId);
@@ -597,6 +617,25 @@ public class AdminController {
                 attempt = attemptRepository.findById(id).orElse(null);
                 if (attempt != null) {
                     session = sessionRepository.findByAttemptId(attempt.getId()).orElse(null);
+                }
+            }
+        }
+
+        if (attempt == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        if (resolved != null) {
+            if ("ROLE_STUDENT".equals(resolved.getRole())) {
+                if (attempt.getStudent() != null && !attempt.getStudent().getId().equals(resolved.getId())) {
+                    return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN)
+                            .body(Map.of("error", "Access denied: You do not own this proctoring report."));
+                }
+            } else if ("ROLE_TEACHER".equals(resolved.getRole())) {
+                if (attempt.getExam() != null && attempt.getExam().getTeacher() != null &&
+                        !attempt.getExam().getTeacher().getId().equals(resolved.getId())) {
+                    return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN)
+                            .body(Map.of("error", "Access denied: You do not own the exam for this report."));
                 }
             }
         }
@@ -715,13 +754,15 @@ public class AdminController {
             @AuthenticationPrincipal CustomUserDetails userDetails) {
 
         CustomUserDetails resolved = resolveUser(userDetails);
-        boolean isTeacher = resolved != null && "ROLE_TEACHER".equals(resolved.getRole());
-        List<Exam> exams;
-        if (isTeacher) {
-            exams = examRepository.findByTeacherId(resolved.getId());
-        } else {
-            exams = examRepository.findAll();
+        if (resolved == null) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
         }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).build();
+        }
+        List<Exam> exams = "ROLE_TEACHER".equals(resolved.getRole())
+                ? examRepository.findByTeacherId(resolved.getId())
+                : examRepository.findAll();
 
         Set<Long> allowedExamIds = exams.stream().map(Exam::getId).collect(Collectors.toSet());
 

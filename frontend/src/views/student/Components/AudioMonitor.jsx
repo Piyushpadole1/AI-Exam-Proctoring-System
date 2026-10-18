@@ -76,28 +76,38 @@ export default function AudioMonitor({ onViolation, isActive }) {
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Float32Array(bufferLength);
 
+        let sustainedCount = 0;
+
         intervalRef.current = setInterval(() => {
           if (cancelled || !isActive) return;
 
           analyser.getFloatTimeDomainData(dataArray);
 
-          // Calculate RMS (root mean square) amplitude
+          // Calculate RMS amplitude
           let sumSquares = 0;
           for (let i = 0; i < bufferLength; i++) {
             sumSquares += dataArray[i] * dataArray[i];
           }
           const rms = Math.sqrt(sumSquares / bufferLength);
 
-          const { NOISE_THRESHOLD, SPEECH_THRESHOLD } = PROCTORING_CONFIG.audio;
+          const { NOISE_THRESHOLD = 0.05, SPEECH_THRESHOLD = 0.08 } = PROCTORING_CONFIG.audio || {};
 
           if (rms >= SPEECH_THRESHOLD) {
-            const confidence = Math.min(1.0, rms / 0.5);
-            emit('SPEECH_DETECTED', confidence, { rms: rms.toFixed(4) });
+            sustainedCount++;
+            // Sustained sound / speech detected over consecutive checks
+            if (sustainedCount >= 2) {
+              const confidence = Math.min(1.0, Math.max(0.6, rms / 0.3));
+              emit('EXTERNAL_VOICE', confidence, { rms: rms.toFixed(4), sustainedCount });
+              sustainedCount = 0;
+            }
           } else if (rms >= NOISE_THRESHOLD) {
+            sustainedCount = Math.max(0, sustainedCount - 1);
             const confidence = Math.min(1.0, rms / 0.3);
             emit('BACKGROUND_NOISE', confidence, { rms: rms.toFixed(4) });
+          } else {
+            sustainedCount = 0;
           }
-        }, PROCTORING_CONFIG.audio.ANALYSIS_INTERVAL);
+        }, PROCTORING_CONFIG.audio?.ANALYSIS_INTERVAL || 500);
 
         console.log('[AudioMonitor] Audio monitoring started');
       } catch (err) {

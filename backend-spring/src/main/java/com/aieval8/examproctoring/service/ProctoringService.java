@@ -24,6 +24,7 @@ public class ProctoringService {
     private final ProctoringSessionRepository sessionRepository;
     private final ProctoringEventRepository eventRepository;
     private final ExamAttemptRepository attemptRepository;
+    private final com.aieval8.examproctoring.repository.ExamEnrollmentRepository enrollmentRepository;
     private final com.aieval8.examproctoring.repository.CheatingLogEntryRepository cheatingLogRepository;
     private final ScoringEngineService scoringEngine;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -31,11 +32,13 @@ public class ProctoringService {
     public ProctoringService(ProctoringSessionRepository sessionRepository,
                              ProctoringEventRepository eventRepository,
                              ExamAttemptRepository attemptRepository,
+                             com.aieval8.examproctoring.repository.ExamEnrollmentRepository enrollmentRepository,
                              com.aieval8.examproctoring.repository.CheatingLogEntryRepository cheatingLogRepository,
                              ScoringEngineService scoringEngine) {
         this.sessionRepository = sessionRepository;
         this.eventRepository = eventRepository;
         this.attemptRepository = attemptRepository;
+        this.enrollmentRepository = enrollmentRepository;
         this.cheatingLogRepository = cheatingLogRepository;
         this.scoringEngine = scoringEngine;
     }
@@ -76,34 +79,48 @@ public class ProctoringService {
         );
         eventRepository.save(event);
 
-        // Fetch all violations for this session
-        List<ProctoringEvent> allViolations = eventRepository.findBySessionIdOrderByTimestampAsc(session.getId());
+        // Fetch all violations for this session (excluding milestone events like EXAM_STARTED)
+        List<ProctoringEvent> allViolations = eventRepository.findBySessionIdOrderByTimestampAsc(session.getId()).stream()
+                .filter(ev -> ev.getPenaltyPoints() != null && ev.getPenaltyPoints() > 0 &&
+                              !ev.getEventType().equalsIgnoreCase("EXAM_STARTED") &&
+                              !ev.getEventType().equalsIgnoreCase("EXAM_SUBMITTED"))
+                .toList();
+        int runningPoints = allViolations.size();
 
-        double eventScore = scoringEngine.calculateEventScore(allViolations);
-        double aiScore = scoringEngine.calculateAIBehaviorScore(allViolations);
-        double hybridScore = scoringEngine.calculateHybridScore(eventScore, aiScore);
-        String classification = scoringEngine.classify(hybridScore);
-        boolean shouldTerminate = scoringEngine.shouldTerminate(hybridScore) || allViolations.size() >= 6;
-        if (allViolations.size() >= 6) {
-            classification = "MALPRACTICE";
-        }
+        // Exactly 6-violation scale: fairness drops proportionally, 0% at 6 violations
+        double fairnessScore = Math.max(0.0, Math.round(((6.0 - Math.min(6, runningPoints)) / 6.0) * 100.0 * 10.0) / 10.0);
+        double hybridScore = Math.max(0.0, 100.0 - fairnessScore);
+        String classification = runningPoints < 3 ? "SAFE" : (runningPoints < 6 ? "WARNING" : "MALPRACTICE");
+        boolean shouldTerminate = runningPoints >= 6;
 
-        session.setEventScore(eventScore);
-        session.setAiScore(aiScore);
+        session.setEventScore((double) runningPoints);
+        session.setAiScore(hybridScore);
         session.setHybridScore(hybridScore);
-        session.setIntegrityScore(Math.max(0.0, 100.0 - hybridScore));
+        session.setIntegrityScore(fairnessScore);
         session.setVerdict(classification);
-        session.setTotalViolations(allViolations.size());
+        session.setTotalViolations(runningPoints);
         sessionRepository.save(session);
 
         // Update integrity score on attempt
-        attempt.setIntegrityScore(session.getIntegrityScore());
+        attempt.setIntegrityScore(fairnessScore);
 
         if (shouldTerminate) {
             attempt.setStatus(AttemptStatus.DISQUALIFIED);
             attempt.setSubmittedAt(LocalDateTime.now());
             session.setEndedAt(LocalDateTime.now());
             sessionRepository.save(session);
+
+            // Mark student enrollment as COMPLETED on proctoring disqualification
+            if (attempt.getExam() != null && attempt.getStudent() != null) {
+                try {
+                    enrollmentRepository.findByExamIdAndStudentId(attempt.getExam().getId(), attempt.getStudent().getId())
+                            .ifPresent(en -> {
+                                en.setStatus(EnrollmentStatus.COMPLETED);
+                                en.setUpdatedAt(LocalDateTime.now());
+                                enrollmentRepository.save(en);
+                            });
+                } catch (Exception ignored) {}
+            }
         }
 
         attemptRepository.save(attempt);
@@ -150,7 +167,8 @@ public class ProctoringService {
         }
 
         return new ViolationResponse(true, hybridScore, classification, shouldTerminate,
-                shouldTerminate ? "Exam terminated: Malpractice threshold exceeded." : "Violation recorded.");
+                shouldTerminate ? "Exam terminated: Malpractice threshold exceeded (6/6 violations)." : "Violation recorded.",
+                runningPoints, fairnessScore);
     }
 
     public List<ProctoringEvent> getSessionEvents(Long attemptId, CustomUserDetails userDetails) {

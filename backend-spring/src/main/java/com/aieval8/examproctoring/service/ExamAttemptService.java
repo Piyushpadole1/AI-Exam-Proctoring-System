@@ -25,6 +25,7 @@ public class ExamAttemptService {
     private final ExamEnrollmentRepository enrollmentRepository;
     private final ExamRepository examRepository;
     private final QuestionRepository questionRepository;
+    private final CodingQuestionRepository codingQuestionRepository;
     private final ProctoringSessionRepository sessionRepository;
     private final UserRepository userRepository;
     private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
@@ -34,6 +35,7 @@ public class ExamAttemptService {
                               ExamEnrollmentRepository enrollmentRepository,
                               ExamRepository examRepository,
                               QuestionRepository questionRepository,
+                              CodingQuestionRepository codingQuestionRepository,
                               ProctoringSessionRepository sessionRepository,
                               UserRepository userRepository,
                               org.springframework.security.crypto.password.PasswordEncoder passwordEncoder) {
@@ -41,6 +43,7 @@ public class ExamAttemptService {
         this.enrollmentRepository = enrollmentRepository;
         this.examRepository = examRepository;
         this.questionRepository = questionRepository;
+        this.codingQuestionRepository = codingQuestionRepository;
         this.sessionRepository = sessionRepository;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
@@ -78,6 +81,9 @@ public class ExamAttemptService {
 
         User student = userRepository.findById(resolved.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Student not found"));
+        if (student.getRole() != Role.ROLE_STUDENT) {
+            throw new AccessDeniedException("Access denied: Only students can take exams.");
+        }
 
         // GATEKEEPER 1: Password verification
         if (exam.getExamPasswordHash() != null && !exam.getExamPasswordHash().isEmpty()) {
@@ -99,8 +105,22 @@ public class ExamAttemptService {
         if (enrollment.getStatus() == EnrollmentStatus.BLOCKED) {
             throw new ExamAccessException("Access Denied: You are blocked from participating in this exam.");
         }
+        if (enrollment.getStatus() == EnrollmentStatus.COMPLETED) {
+            throw new ExamAccessException("Access Denied: You have already completed this exam. Multiple attempts are not permitted.");
+        }
         if (enrollment.getStatus() != EnrollmentStatus.ENROLLED) {
             throw new ExamAccessException("Access Denied: Your enrollment status is " + enrollment.getStatus() + ". Only approved students may take the exam.");
+        }
+
+        // GATEKEEPER 2.5: Prevent multiple submissions / retakes of the same exam
+        List<ExamAttempt> pastAttempts = attemptRepository.findByExamIdAndStudentId(exam.getId(), student.getId());
+        boolean alreadySubmitted = pastAttempts.stream().anyMatch(a ->
+                a.getStatus() == AttemptStatus.SUBMITTED ||
+                a.getStatus() == AttemptStatus.COMPLETED ||
+                a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                a.getStatus() == AttemptStatus.AUTO_SUBMITTED);
+        if (alreadySubmitted) {
+            throw new ExamAccessException("Access Denied: You have already completed and submitted this examination. Multiple attempts are not permitted.");
         }
 
         // GATEKEEPER 3: Resume existing active attempt if available
@@ -113,13 +133,7 @@ public class ExamAttemptService {
             return new AttemptResponse(attempt, secondsLeft);
         }
 
-        // GATEKEEPER 4: Multi-client institution isolation check
-        if (student.getClient() != null && exam.getClient() != null
-                && !java.util.Objects.equals(student.getClient().getId(), exam.getClient().getId())) {
-            throw new ExamAccessException("Access Denied: This exam belongs to a different institution.");
-        }
-
-        // GATEKEEPER 5: Exam availability and timeline check
+        // GATEKEEPER 4: Exam availability and timeline check
         if ("ARCHIVED".equalsIgnoreCase(exam.getStatus()) || "DRAFT".equalsIgnoreCase(exam.getStatus())) {
             throw new ExamAccessException("Exam is currently not active or available.");
         }
@@ -131,7 +145,7 @@ public class ExamAttemptService {
             throw new ExamAccessException("Exam has ended. Ended at: " + exam.getEndTime());
         }
 
-        // GATEKEEPER 6: Check attempt limit
+        // GATEKEEPER 5: Check attempt limit
         if (enrollment.getAttemptsUsed() >= enrollment.getAttemptLimit()) {
             throw new ExamAccessException("Access Denied: You have already exhausted your allowed attempts for this exam.");
         }
@@ -199,59 +213,120 @@ public class ExamAttemptService {
 
         // Grade MCQ Questions
         List<Question> questions = questionRepository.findByExamId(attempt.getExam().getId());
-        double totalScore = 0.0;
-        double maxScore = 0.0;
+        double mcqScore = 0.0;
+        double mcqMaxMarks = 0.0;
 
-        for (Question q : questions) {
-            maxScore += q.getMarks();
+        for (int qIdx = 0; qIdx < questions.size(); qIdx++) {
+            Question q = questions.get(qIdx);
+            mcqMaxMarks += q.getMarks();
             if (answers != null) {
                 String studentAns = null;
+                // Try multiple key formats
                 if (answers.containsKey(q.getId().toString())) {
                     studentAns = String.valueOf(answers.get(q.getId().toString()));
                 } else if (answers.containsKey(String.valueOf(q.getId()))) {
                     studentAns = String.valueOf(answers.get(String.valueOf(q.getId())));
+                } else if (answers.containsKey(String.valueOf(qIdx))) {
+                    studentAns = String.valueOf(answers.get(String.valueOf(qIdx)));
+                } else if (answers.containsKey(String.valueOf(qIdx + 1))) {
+                    studentAns = String.valueOf(answers.get(String.valueOf(qIdx + 1)));
+                } else {
+                    for (Map.Entry<String, String> entry : answers.entrySet()) {
+                        if (entry.getKey() != null && (
+                                entry.getKey().trim().equalsIgnoreCase(q.getId().toString()) ||
+                                entry.getKey().trim().equalsIgnoreCase(String.valueOf(qIdx)) ||
+                                entry.getKey().trim().equalsIgnoreCase(q.getQuestionText().trim()))) {
+                            studentAns = String.valueOf(entry.getValue());
+                            break;
+                        }
+                    }
                 }
 
                 if (studentAns != null && !studentAns.trim().isEmpty()) {
                     boolean isMatch = false;
+                    String cleanAns = studentAns.trim();
+
+                    // Parse options list
+                    List<?> rawOpts = null;
                     try {
-                        int selected = Integer.parseInt(studentAns.trim());
+                        rawOpts = objectMapper.readValue(q.getOptionsJson(), List.class);
+                    } catch (Exception ignored) {}
+
+                    // 1. Direct index matching (0-based)
+                    try {
+                        int selected = Integer.parseInt(cleanAns);
                         if (selected == q.getCorrectOptionIndex()) {
                             isMatch = true;
+                        } else if (selected == (q.getCorrectOptionIndex() + 1)) {
+                            // 1-based index support
+                            isMatch = true;
                         }
-                    } catch (NumberFormatException ignored) {
+                    } catch (NumberFormatException ignored) {}
+
+                    // 2. Letter matching (A, B, C, D...)
+                    if (!isMatch && cleanAns.length() == 1) {
+                        char c = Character.toUpperCase(cleanAns.charAt(0));
+                        if (c >= 'A' && c <= 'Z') {
+                            int letterIdx = c - 'A';
+                            if (letterIdx == q.getCorrectOptionIndex()) {
+                                isMatch = true;
+                            }
+                        }
                     }
 
-                    if (!isMatch) {
-                        try {
-                            List<?> rawOpts = objectMapper.readValue(q.getOptionsJson(), List.class);
-                            if (rawOpts != null && q.getCorrectOptionIndex() >= 0 && q.getCorrectOptionIndex() < rawOpts.size()) {
-                                Object correctOpt = rawOpts.get(q.getCorrectOptionIndex());
-                                String correctText = "";
-                                if (correctOpt instanceof Map<?, ?> m) {
-                                    Object t = m.get("optionText");
-                                    if (t == null) t = m.get("text");
-                                    if (t == null) t = m.get("option");
-                                    correctText = t != null ? t.toString() : "";
-                                } else if (correctOpt != null) {
-                                    correctText = correctOpt.toString();
-                                }
-                                if (!correctText.isEmpty() && correctText.trim().equalsIgnoreCase(studentAns.trim())) {
-                                    isMatch = true;
-                                }
-                            }
-                        } catch (Exception ignored) {}
+                    // 3. Option text or option ID matching
+                    if (!isMatch && rawOpts != null && q.getCorrectOptionIndex() >= 0 && q.getCorrectOptionIndex() < rawOpts.size()) {
+                        Object correctOpt = rawOpts.get(q.getCorrectOptionIndex());
+                        String correctText = "";
+                        String correctId = null;
+                        if (correctOpt instanceof Map<?, ?> m) {
+                            Object t = m.get("optionText");
+                            if (t == null) t = m.get("text");
+                            if (t == null) t = m.get("option");
+                            correctText = t != null ? t.toString() : "";
+                            Object idObj = m.get("id");
+                            if (idObj == null) idObj = m.get("_id");
+                            if (idObj != null) correctId = idObj.toString();
+                        } else if (correctOpt != null) {
+                            correctText = correctOpt.toString();
+                        }
+
+                        if (!correctText.isEmpty() && correctText.trim().equalsIgnoreCase(cleanAns)) {
+                            isMatch = true;
+                        } else if (correctId != null && correctId.trim().equalsIgnoreCase(cleanAns)) {
+                            isMatch = true;
+                        }
                     }
 
                     if (isMatch) {
-                        totalScore += q.getMarks();
+                        mcqScore += q.getMarks();
                     }
                 }
             }
         }
 
-        double percentage = maxScore > 0 ? (totalScore / maxScore) * 100.0 : 0.0;
-        boolean passed = totalScore >= (attempt.getExam().getPassingMarks() != null ? attempt.getExam().getPassingMarks() : 40.0);
+        // Combine Coding marks if exam has a coding round
+        Exam exam = attempt.getExam();
+        double codingMaxMarks = 0.0;
+        double codingEarnedMarks = 0.0;
+
+        if (Boolean.TRUE.equals(exam.getHasCodingRound())) {
+            codingMaxMarks = exam.getCodingMarks() != null && exam.getCodingMarks() > 0 ? exam.getCodingMarks() : 20.0;
+            // Check if student already earned coding score on this attempt
+            if (attempt.getScore() != null && attempt.getScore() > 0) {
+                // If previous score exists and exceeds MCQ score, preserve coding portion
+                codingEarnedMarks = Math.max(0.0, attempt.getScore() - mcqScore);
+            }
+        }
+
+        double totalScore = mcqScore + codingEarnedMarks;
+        double totalMaxScore = exam.getTotalMarks() != null && exam.getTotalMarks() > 0
+                ? exam.getTotalMarks()
+                : (mcqMaxMarks + codingMaxMarks);
+
+        double percentage = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100.0 : 0.0;
+        double passMark = exam.getPassingMarks() != null ? exam.getPassingMarks() : 40.0;
+        boolean passed = totalScore >= passMark;
 
         attempt.setScore(totalScore);
         attempt.setPercentage(Math.round(percentage * 100.0) / 100.0);
@@ -266,6 +341,19 @@ public class ExamAttemptService {
             session.setEndedAt(LocalDateTime.now());
             sessionRepository.save(session);
         });
+
+        // Mark student enrollment as COMPLETED so it updates the status permanently in the database
+        if (attempt.getExam() != null && attempt.getStudent() != null) {
+            try {
+                enrollmentRepository.findByExamIdAndStudentId(attempt.getExam().getId(), attempt.getStudent().getId())
+                        .ifPresent(en -> {
+                            en.setStatus(EnrollmentStatus.COMPLETED);
+                            en.setUpdatedAt(LocalDateTime.now());
+                            en.setAttemptsUsed(en.getAttemptsUsed() + 1);
+                            enrollmentRepository.save(en);
+                        });
+            } catch (Exception ignored) {}
+        }
 
         return new AttemptResponse(attempt, 0L);
     }

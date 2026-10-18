@@ -7,13 +7,18 @@ import {
   Button,
   Stack,
   Checkbox,
+  IconButton,
+  InputAdornment,
 } from '@mui/material';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { Link } from 'react-router-dom';
 
 import CustomTextField from '../../../components/forms/theme-elements/CustomTextField';
 
 const AuthLogin = ({ formik, title, subtitle, subtext }) => {
   const { values, errors, touched, handleBlur, handleChange, handleSubmit } = formik;
+  const [showPassword, setShowPassword] = React.useState(false);
   return (
     <>
       {title ? (
@@ -62,7 +67,7 @@ const AuthLogin = ({ formik, title, subtitle, subtext }) => {
           <CustomTextField
             id="password"
             name="password"
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             variant="outlined"
             value={values.password}
             onChange={handleChange}
@@ -71,6 +76,20 @@ const AuthLogin = ({ formik, title, subtitle, subtext }) => {
             helperText={touched.password && errors.password ? errors.password : null}
             required
             fullWidth
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    edge="end"
+                  >
+                    {showPassword ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
           />
         </Box>
         <Stack justifyContent="space-between" direction="row" alignItems="center" my={2}>

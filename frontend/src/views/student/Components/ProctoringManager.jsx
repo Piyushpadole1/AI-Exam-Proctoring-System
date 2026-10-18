@@ -21,6 +21,7 @@ import WebCam from './WebCam';
 import axiosInstance from '../../../axios';
 import PROCTORING_CONFIG from '../../../config/proctoring';
 import { UploadClient } from '@uploadcare/upload-client';
+import { toast } from 'react-toastify';
 
 const uploadClient = new UploadClient({ publicKey: 'e69ab6e5db6d4a41760b' });
 
@@ -39,13 +40,24 @@ export default function ProctoringManager({
   const [isTerminated, setIsTerminated] = useState(false);
   const evidenceCooldown = useRef({});
 
+  const sessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  const isActiveRef = useRef(isActive);
+  useEffect(() => {
+    isActiveRef.current = isActive;
+  }, [isActive]);
+
   // ── Handle any violation from any monitor ─────────────────────────
   const handleViolation = useCallback(
     async (violation) => {
-      if (!sessionId || !isActive || isTerminated) return;
+      const activeSessionId = sessionIdRef.current || sessionId;
+      if (!activeSessionId || !isActiveRef.current || isTerminated) return;
 
       const payload = {
-        sessionId,
+        sessionId: activeSessionId,
         eventType: violation.eventType,
         confidence: violation.confidence || 1.0,
         description: violation.description || '',
@@ -74,9 +86,13 @@ export default function ProctoringManager({
       const data = response.data;
 
       if (data.success) {
-        setCurrentScore(data.currentScore || 0);
-        setClassification(data.classification || 'SAFE');
-        setTotalViolations((prev) => prev + 1);
+        const newViolationsCount = data.runningPoints !== undefined ? data.runningPoints : totalViolations + 1;
+        setTotalViolations(newViolationsCount);
+        setCurrentScore(data.currentScore !== undefined ? data.currentScore : Math.max(0, 100 - newViolationsCount * 16));
+        setClassification(data.classification || (newViolationsCount >= 6 ? 'MALPRACTICE' : newViolationsCount >= 3 ? 'WARNING' : 'SAFE'));
+
+        const desc = violation.description || violation.eventType.replace(/_/g, ' ');
+        toast.warning(`⚠️ Warning: ${desc} (${newViolationsCount}/6 violations recorded)`);
 
         // Update legacy cheating log context for backward compatibility
         const typeMap = {
@@ -99,15 +115,15 @@ export default function ProctoringManager({
         // Capture evidence for high-severity events if no screenshot was attached
         if (
           !payload.evidenceUrl &&
-          ['MULTIPLE_FACES', 'CELL_PHONE_DETECTED', 'NO_FACE_DETECTED'].includes(
+          ['MULTIPLE_FACES', 'CELL_PHONE_DETECTED', 'NO_FACE_DETECTED', 'HEAD_TURNED', 'EYE_GAZE_AWAY'].includes(
             violation.eventType,
           )
         ) {
           captureEvidence(violation.eventType);
         }
 
-        // Check auto-termination
-        if (data.shouldTerminate) {
+        // Immediate Auto-Termination at 6 violations
+        if (newViolationsCount >= 6 || data.shouldTerminate) {
           setIsTerminated(true);
           if (onTerminate) {
             onTerminate('Exam terminated: Malpractice threshold exceeded (6 violations reached).');
@@ -115,7 +131,7 @@ export default function ProctoringManager({
         }
       }
     },
-    [sessionId, isActive, isTerminated, onTerminate, cheatingLog, updateCheatingLog, examId],
+    [sessionId, isActive, isTerminated, onTerminate, cheatingLog, updateCheatingLog, examId, totalViolations],
   );
 
   // ── Evidence Capture ──────────────────────────────────────────────

@@ -7,16 +7,44 @@ public class ViolationResponse {
     private String classification;
     private boolean shouldTerminate;
     private String message;
+    private Integer totalViolations;
+    private Double fairnessScore;
 
     public ViolationResponse() {
     }
 
     public ViolationResponse(boolean success, Double currentScore, String classification, boolean shouldTerminate, String message) {
+        this(success, currentScore, classification, shouldTerminate, message, null, null);
+    }
+
+    public ViolationResponse(boolean success, Double currentScore, String classification, boolean shouldTerminate, String message, Integer totalViolations, Double fairnessScore) {
         this.success = success;
         this.currentScore = currentScore;
         this.classification = classification;
         this.shouldTerminate = shouldTerminate;
         this.message = message;
+        this.totalViolations = totalViolations;
+        this.fairnessScore = fairnessScore;
+    }
+
+    public Integer getTotalViolations() {
+        return totalViolations;
+    }
+
+    public Integer getRunningPoints() {
+        return totalViolations;
+    }
+
+    public void setTotalViolations(Integer totalViolations) {
+        this.totalViolations = totalViolations;
+    }
+
+    public Double getFairnessScore() {
+        return fairnessScore;
+    }
+
+    public void setFairnessScore(Double fairnessScore) {
+        this.fairnessScore = fairnessScore;
     }
 
     public boolean isSuccess() {

@@ -1,38 +1,46 @@
 import React, { useEffect, useState } from 'react';
-import Radio from '@mui/material/Radio';
-import RadioGroup from '@mui/material/RadioGroup';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import FormControl from '@mui/material/FormControl';
-import FormLabel from '@mui/material/FormLabel';
-import Button from '@mui/material/Button';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
-import Typography from '@mui/material/Typography';
-import Box from '@mui/material/Box';
-import Stack from '@mui/material/Stack';
-import { Container } from '@mui/material';
-import { useGetQuestionsQuery } from 'src/slices/examApiSlice';
+import {
+  Radio,
+  RadioGroup,
+  FormControlLabel,
+  FormControl,
+  FormLabel,
+  Button,
+  Card,
+  CardContent,
+  Typography,
+  Box,
+  Stack,
+  Chip,
+  IconButton,
+  Tooltip,
+} from '@mui/material';
+import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import FlagIcon from '@mui/icons-material/Flag';
+import OutlinedFlagIcon from '@mui/icons-material/OutlinedFlag';
 import { useNavigate, useParams } from 'react-router';
 import axiosInstance from '../../../axios';
 import { toast } from 'react-toastify';
 
-export default function MultipleChoiceQuestion({ questions, saveUserTestScore, submitTest, sessionId }) {
-  const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [selectedOption, setSelectedOption] = useState(null);
-  const [score, setScore] = useState(0);
-  const [answers, setAnswers] = useState(new Map());
+export default function MultipleChoiceQuestion({
+  questions,
+  currentQuestion = 0,
+  setCurrentQuestion,
+  answers = {},
+  setAnswers,
+  flaggedQuestions = {},
+  toggleFlagQuestion,
+  saveUserTestScore,
+  submitTest,
+  sessionId,
+}) {
   const [exam, setExam] = useState(null);
   const navigate = useNavigate();
   const { examId } = useParams();
 
-  const [isLastQuestion, setIsLastQuestion] = useState(false);
-  const [isFinishTest, setisFinishTest] = useState(false);
-
   const questionList = Array.isArray(questions) ? questions : [];
-
-  useEffect(() => {
-    setIsLastQuestion(currentQuestion === questionList.length - 1);
-  }, [currentQuestion, questionList.length]);
+  const isLastQuestion = currentQuestion === questionList.length - 1;
 
   useEffect(() => {
     const fetchExamInfo = async () => {
@@ -65,7 +73,7 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
             if (hasCoding) {
               navigate(`/exam/${examId}/codedetails`);
             } else if (submitTest) {
-              submitTest();
+              submitTest(answers);
             } else {
               navigate(`/result`);
             }
@@ -83,112 +91,96 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
     return null;
   }
 
+  const qKey = String(currentQuestionData._id || currentQuestionData.id);
+  const currentSelectedOption = answers[qKey] !== undefined ? String(answers[qKey]) : '';
+  const isFlagged = Boolean(flaggedQuestions[currentQuestion]);
+
   const handleOptionChange = (event) => {
     const val = event.target.value;
-    setSelectedOption(val);
-    if (sessionId && currentQuestionData) {
-      try {
-        const qKey = String(currentQuestionData._id || currentQuestionData.id);
-        const currentMap = Object.fromEntries(answers);
-        currentMap[qKey] = val;
-        axiosInstance.put(`/api/sessions/${sessionId}/autosave`, { answers: currentMap }).catch(() => {});
-      } catch (e) {}
+    const updated = {
+      ...answers,
+      [qKey]: val,
+      [String(currentQuestion)]: val,
+    };
+    if (setAnswers) {
+      setAnswers(updated);
+    }
+    if (sessionId) {
+      axiosInstance.put(`/api/sessions/${sessionId}/autosave`, { answers: updated }).catch(() => {});
     }
   };
 
-  const handleNextQuestion = async () => {
-    let isCorrect = false;
-
-    if (currentQuestionData && currentQuestionData.options) {
-      const correctOption = currentQuestionData.options.find((option) => option.isCorrect);
-      if (correctOption && selectedOption !== null) {
-        const correctVal = String(
-          correctOption.id !== undefined ? correctOption.id : (correctOption.index !== undefined ? correctOption.index : correctOption.optionText)
-        );
-        isCorrect = correctVal === String(selectedOption);
-      }
+  const handlePrev = () => {
+    if (setCurrentQuestion && currentQuestion > 0) {
+      setCurrentQuestion(currentQuestion - 1);
     }
+  };
 
-    const qKey = String(currentQuestionData._id || currentQuestionData.id);
-    const updatedAnswers = new Map(answers);
-    if (selectedOption !== null) {
-      updatedAnswers.set(qKey, selectedOption);
-    }
-    setAnswers(updatedAnswers);
-
-    if (isCorrect) {
-      setScore(score + 1);
-      if (saveUserTestScore) saveUserTestScore();
-    }
-
-    if (isLastQuestion) {
-      const answersObject = Object.fromEntries(updatedAnswers);
-      if (selectedOption !== null) {
-        answersObject[qKey] = selectedOption;
-      }
-
-      try {
-        await axiosInstance.post(
-          '/api/users/results',
-          {
-            examId,
-            answers: answersObject,
-          },
-          {
-            withCredentials: true,
-          },
-        );
-      } catch (error) {
-        console.warn('Error recording result in legacy endpoint:', error);
-      }
-
-      if (exam?.hasCodingRound) {
-        navigate(`/exam/${examId}/codedetails`);
-      } else {
-        toast.success('Exam completed successfully!');
-        if (submitTest) {
-          submitTest(answersObject);
-        } else {
-          navigate(`/result`);
-        }
-      }
-    }
-
-    setSelectedOption(null);
-    if (currentQuestion < questionList.length - 1) {
+  const handleNext = () => {
+    if (setCurrentQuestion && currentQuestion < questionList.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
+    }
+  };
+
+  const handleSubmitOrProceed = async () => {
+    if (exam?.hasCodingRound) {
+      navigate(`/exam/${examId}/codedetails`, { state: { mcqAnswers: answers, sessionId } });
     } else {
-      setisFinishTest(true);
+      toast.success('MCQ section completed!');
+      if (submitTest) {
+        submitTest(answers);
+      } else {
+        navigate(`/result`);
+      }
     }
   };
 
   return (
-    <Card
-      style={{
-        width: '50%',
-        boxShadow: '2px',
-      }}
-    >
-      <CardContent
-        style={{
-          boxShadow: '4px',
-          padding: '2px',
-          paddingRight: '4px',
-          margin: '3px',
-        }}
-      >
-        <Typography variant="h4" mb={3}>
-          Question {currentQuestion + 1}:
+    <Card sx={{ width: '92%', maxWidth: '750px', m: 2, borderRadius: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+      <CardContent sx={{ p: 3 }}>
+        {/* Header row: Question Number & Flag button */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Box display="flex" alignItems="center" gap={1}>
+            <Typography variant="h4" fontWeight={700}>
+              Question {currentQuestion + 1}
+            </Typography>
+            <Typography variant="body2" color="textSecondary">
+              of {questionList.length}
+            </Typography>
+            <Chip
+              size="small"
+              label={`${currentQuestionData.marks || 1} mark${(currentQuestionData.marks || 1) > 1 ? 's' : ''}`}
+              variant="outlined"
+              sx={{ ml: 1 }}
+            />
+          </Box>
+
+          {toggleFlagQuestion && (
+            <Button
+              variant={isFlagged ? 'contained' : 'outlined'}
+              color="warning"
+              size="small"
+              startIcon={isFlagged ? <FlagIcon /> : <OutlinedFlagIcon />}
+              onClick={() => toggleFlagQuestion(currentQuestion)}
+              sx={{ textTransform: 'none', fontWeight: 600 }}
+            >
+              {isFlagged ? 'Flagged for Review' : 'Flag for Review'}
+            </Button>
+          )}
+        </Box>
+
+        {/* Question Text */}
+        <Typography variant="h6" fontWeight={500} mb={3} sx={{ lineHeight: 1.6, color: '#1e293b' }}>
+          {currentQuestionData.question || currentQuestionData.questionText}
         </Typography>
-        <Typography variant="body1" mb={3}>
-          {currentQuestionData.question}
-        </Typography>
-        <Box mb={10}>
-          <FormControl component="fieldset">
+
+        {/* Options */}
+        <Box mb={4}>
+          <FormControl component="fieldset" sx={{ width: '100%' }}>
             <RadioGroup
-              aria-label="quiz"
-              name="quiz"
-              value={selectedOption !== null ? String(selectedOption) : ''}
+              aria-label="quiz-options"
+              name="quiz-options"
+              value={currentSelectedOption}
               onChange={handleOptionChange}
             >
               {Array.isArray(currentQuestionData.options) &&
@@ -198,37 +190,74 @@ export default function MultipleChoiceQuestion({ questions, saveUserTestScore, s
                     option.text ||
                     option.option ||
                     (typeof option === 'string' ? option : `Option ${idx + 1}`);
-                  const optVal = String(
-                    option.id !== undefined && option.id !== null
-                      ? option.id
-                      : option._id !== undefined && option._id !== null
-                        ? option._id
-                        : option.index !== undefined && option.index !== null
-                          ? option.index
-                          : idx
-                  );
+                  const optVal = String(idx);
+                  const isChecked = currentSelectedOption === optVal || currentSelectedOption === String(option?.id);
+
                   return (
-                    <FormControlLabel
-                      key={optVal + '-' + idx}
-                      value={optVal}
-                      control={<Radio />}
-                      label={optText}
-                    />
+                    <Box
+                      key={`${optVal}-${idx}`}
+                      sx={{
+                        mb: 1.5,
+                        p: 1.5,
+                        borderRadius: 1.5,
+                        border: '1.5px solid',
+                        borderColor: isChecked ? 'primary.main' : '#e2e8f0',
+                        bgcolor: isChecked ? 'rgba(79, 70, 229, 0.04)' : '#fff',
+                        transition: 'all 0.15s ease-in-out',
+                        '&:hover': {
+                          borderColor: isChecked ? 'primary.main' : '#cbd5e1',
+                          bgcolor: isChecked ? 'rgba(79, 70, 229, 0.06)' : '#f8fafc',
+                        },
+                      }}
+                    >
+                      <FormControlLabel
+                        value={optVal}
+                        control={<Radio color="primary" />}
+                        label={<Typography variant="body1" sx={{ fontWeight: isChecked ? 600 : 400 }}>{optText}</Typography>}
+                        sx={{ width: '100%', m: 0 }}
+                      />
+                    </Box>
                   );
                 })}
             </RadioGroup>
           </FormControl>
         </Box>
-        <Stack direction="row" spacing={2} justifyContent="space-between">
+
+        {/* Navigation Bar: Previous, Next, Submit */}
+        <Stack direction="row" spacing={2} justifyContent="space-between" alignItems="center">
           <Button
-            variant="contained"
-            color="primary"
-            onClick={handleNextQuestion}
-            disabled={selectedOption === null}
-            style={{ marginLeft: 'auto' }}
+            variant="outlined"
+            color="inherit"
+            startIcon={<NavigateBeforeIcon />}
+            onClick={handlePrev}
+            disabled={currentQuestion === 0}
+            sx={{ fontWeight: 600, textTransform: 'none' }}
           >
-            {isLastQuestion ? (exam?.hasCodingRound ? 'Proceed to Coding' : 'Submit Exam') : 'Next Question'}
+            Previous
           </Button>
+
+          <Box display="flex" gap={1.5}>
+            {isLastQuestion ? (
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSubmitOrProceed}
+                sx={{ fontWeight: 700, px: 3, textTransform: 'none' }}
+              >
+                {exam?.hasCodingRound ? 'Proceed to Coding Round' : 'Submit Exam'}
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                color="primary"
+                endIcon={<NavigateNextIcon />}
+                onClick={handleNext}
+                sx={{ fontWeight: 600, px: 3, textTransform: 'none' }}
+              >
+                Next Question
+              </Button>
+            )}
+          </Box>
         </Stack>
       </CardContent>
     </Card>

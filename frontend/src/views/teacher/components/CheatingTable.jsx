@@ -44,6 +44,7 @@ export default function CheatingTable() {
     error: logsError,
   } = useGetCheatingLogsQuery(selectedExamId, {
     skip: !selectedExamId,
+    pollingInterval: 3000,
   });
 
   useEffect(() => {
@@ -173,7 +174,7 @@ export default function CheatingTable() {
                     (log.cellPhoneCount || 0) +
                     (log.prohibitedObjectCount || 0)
                   );
-                  const fairness = log.fairnessScore ?? Math.max(0, 100 - (totalV * 15));
+                  const fairness = log.fairnessScore ?? Math.max(0, Math.round(((6.0 - Math.min(6, totalV)) / 6.0) * 100));
                   return (
                     <TableRow key={index} hover>
                       <TableCell>{index + 1}</TableCell>
@@ -185,7 +186,7 @@ export default function CheatingTable() {
                       <TableCell>{log.email}</TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={totalV}
+                          label={`${totalV} / 6`}
                           color={totalV >= 6 ? 'error' : totalV > 0 ? 'warning' : 'success'}
                           size="small"
                           sx={{ fontWeight: 'bold' }}

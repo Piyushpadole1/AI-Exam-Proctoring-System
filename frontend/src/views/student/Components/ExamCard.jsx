@@ -28,6 +28,17 @@ export default function ExamCard({ exam }) {
     if (isTeacher) {
       return <Chip label="Faculty Mode" size="small" color="secondary" />;
     }
+    if (exam.isCompleted || enrollmentStatus === 'COMPLETED' || exam.hasAttempted) {
+      return (
+        <Chip
+          icon={<CheckCircleIcon />}
+          label="Completed"
+          size="small"
+          color="info"
+          sx={{ fontWeight: 700, bgcolor: '#e0f2fe', color: '#0369a1' }}
+        />
+      );
+    }
     if (isEnrolled || enrollmentStatus === 'ENROLLED') {
       return (
         <Chip

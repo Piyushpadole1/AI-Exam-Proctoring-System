@@ -50,3 +50,6 @@ target/
 
 # Database backups
 backup/
+
+# IDE workspace metadata
+.metadata/

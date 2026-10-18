@@ -68,15 +68,8 @@ const Header = (props) => {
 
         <IconButton
           size="large"
-          aria-label="show 11 new notifications"
+          aria-label="Notifications"
           color="inherit"
-          aria-controls="msgs-menu"
-          aria-haspopup="true"
-          sx={{
-            ...(typeof anchorEl2 === 'object' && {
-              color: 'primary.main',
-            }),
-          }}
         >
           <Badge variant="dot" color="primary">
             <IconBellRinging size="21" stroke="1.5" />

@@ -51,10 +51,17 @@ const Exams = () => {
   }
 
   const allExams = Array.isArray(userExams) ? userExams : [];
-  const enrolledExams = allExams.filter((e) => Boolean(e.isEnrolled));
+  const completedExams = allExams.filter((e) => Boolean(e.isCompleted) || e.enrollmentStatus === 'COMPLETED' || Boolean(e.hasAttempted));
+  const enrolledExams = allExams.filter((e) => Boolean(e.isEnrolled) && !e.isCompleted && e.enrollmentStatus !== 'COMPLETED' && !e.hasAttempted);
 
-  // Dynamic exams only: enrolled tab shows strictly enrolled exams, active tab shows all active
-  const displayedExams = isStudent && tabValue === 0 ? enrolledExams : allExams;
+  // Filter exams based on active tab
+  const displayedExams = isStudent
+    ? tabValue === 0
+      ? enrolledExams
+      : tabValue === 1
+        ? allExams
+        : completedExams
+    : allExams;
 
   return (
     <PageContainer title="Exams" description="Examination Portal">
@@ -75,6 +82,11 @@ const Exams = () => {
               icon={<ListAltIcon />}
               iconPosition="start"
               label={`All Active Exams (${allExams.length})`}
+            />
+            <Tab
+              icon={<CheckCircleOutlineIcon />}
+              iconPosition="start"
+              label={`Completed Exams (${completedExams.length})`}
             />
           </Tabs>
         </Box>

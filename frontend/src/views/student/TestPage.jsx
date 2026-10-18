@@ -10,6 +10,7 @@ import { useGetExamsQuery, useGetQuestionsQuery } from '../../slices/examApiSlic
 import { useStartSessionMutation, useSubmitSessionMutation, useTerminateSessionMutation } from 'src/slices/sessionApiSlice';
 import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
+import axiosInstance from '../../axios';
 
 const TestPage = () => {
   const { examId, testId } = useParams();
@@ -107,12 +108,22 @@ const TestPage = () => {
     };
 
     initSession();
-  }, [examId, startSession, sessionId, userInfo]);
+  }, [examId, startSession, sessionId, userInfo, permissionsGranted]);
 
   const [questions, setQuestions] = useState([]);
   const { data, isLoading } = useGetQuestionsQuery(examId);
   const [score, setScore] = useState(0);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [flaggedQuestions, setFlaggedQuestions] = useState({});
   const navigate = useNavigate();
+
+  const toggleFlagQuestion = (idx) => {
+    setFlaggedQuestions((prev) => ({
+      ...prev,
+      [idx]: !prev[idx],
+    }));
+  };
 
   useEffect(() => {
     if (data) {
@@ -121,27 +132,44 @@ const TestPage = () => {
   }, [data]);
 
   const handleMcqCompletion = () => {
-    // Bypass the coding test and just submit
-    handleTestSubmission();
+    if (selectedExam?.hasCodingRound) {
+      navigate(`/exam/${examId}/codedetails`, { state: { mcqAnswers: answers, sessionId } });
+    } else {
+      handleTestSubmission(answers);
+    }
   };
 
-  const handleTestSubmission = async (answers = {}) => {
-    if (isSubmitting || !sessionId) return; // Prevent multiple submissions
+  const handleTestSubmission = async (answersToSubmit) => {
+    if (isSubmitting) return; // Prevent multiple submissions
+
+    const finalAnswers = (answersToSubmit && Object.keys(answersToSubmit).length > 0)
+      ? answersToSubmit
+      : (answers && Object.keys(answers).length > 0 ? answers : {});
+
+    const targetSessionId = sessionId;
 
     try {
       setIsSubmitting(true);
       setIsExamActive(false);
 
-      const result = await submitSessionMutation({ sessionId, answers }).unwrap();
-      console.log('Session submitted:', result);
+      if (targetSessionId) {
+        const result = await submitSessionMutation({ sessionId: targetSessionId, answers: finalAnswers }).unwrap();
+        console.log('Session submitted:', result);
+      } else {
+        await axiosInstance.post('/api/users/results', { examId, answers: finalAnswers }, { withCredentials: true });
+      }
 
+      sessionStorage.removeItem(`exam_pwd_${examId}`);
+      sessionStorage.removeItem(`active_attempt_${examId}`);
       toast.success('Test submitted successfully!');
-      navigate(`/exam/${examId}/report/${sessionId}`);
+      navigate('/result', { replace: true });
     } catch (error) {
       console.error('Error submitting session:', error);
+      sessionStorage.removeItem(`exam_pwd_${examId}`);
       toast.error(
         error?.data?.message || 'Failed to submit exam. Please try again.',
       );
+      navigate('/result', { replace: true });
     } finally {
       setIsSubmitting(false);
     }
@@ -158,7 +186,7 @@ const TestPage = () => {
     } catch (e) {
       console.warn('Error recording termination:', e);
     }
-    navigate(`/exam/${examId}/report/${sessionId}`);
+    navigate('/result');
   };
 
   const saveUserTestScore = () => {
@@ -236,7 +264,13 @@ const TestPage = () => {
                 ) : (
                   <MultipleChoiceQuestion
                     submitTest={handleTestSubmission}
-                    questions={data}
+                    questions={questions}
+                    currentQuestion={currentQuestionIndex}
+                    setCurrentQuestion={setCurrentQuestionIndex}
+                    answers={answers}
+                    setAnswers={setAnswers}
+                    flaggedQuestions={flaggedQuestions}
+                    toggleFlagQuestion={toggleFlagQuestion}
                     saveUserTestScore={saveUserTestScore}
                     sessionId={sessionId}
                   />
@@ -249,7 +283,6 @@ const TestPage = () => {
               <Grid item xs={12}>
                 <BlankCard>
                   <Box
-                    maxHeight="300px"
                     sx={{
                       display: 'flex',
                       flexDirection: 'column',
@@ -260,7 +293,12 @@ const TestPage = () => {
                     }}
                   >
                     <NumberOfQuestions
+                      questions={questions}
                       questionLength={questions.length}
+                      currentQuestion={currentQuestionIndex}
+                      setCurrentQuestion={setCurrentQuestionIndex}
+                      answers={answers}
+                      flaggedQuestions={flaggedQuestions}
                       submitTest={handleTestSubmission}
                       examDurationInSeconds={examDurationInSeconds}
                     />

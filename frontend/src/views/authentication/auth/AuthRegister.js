@@ -10,13 +10,19 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  IconButton,
+  InputAdornment,
 } from '@mui/material';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import SchoolIcon from '@mui/icons-material/School';
 import PersonIcon from '@mui/icons-material/Person';
 import CustomTextField from '../../../components/forms/theme-elements/CustomTextField';
 
 const AuthRegister = ({ formik, title, subtitle, subtext }) => {
   const { values, errors, touched, handleBlur, handleChange, setFieldValue } = formik;
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
 
   const handleRoleTabChange = (event, newRole) => {
     if (newRole) {
@@ -147,7 +153,7 @@ const AuthRegister = ({ formik, title, subtitle, subtext }) => {
             <CustomTextField
               id="password"
               name="password"
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               variant="outlined"
               placeholder="Minimum 6 characters"
               value={values.password}
@@ -157,6 +163,20 @@ const AuthRegister = ({ formik, title, subtitle, subtext }) => {
               helperText={touched.password && errors.password}
               required
               fullWidth
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      edge="end"
+                    >
+                      {showPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
             />
           </Box>
 
@@ -168,7 +188,7 @@ const AuthRegister = ({ formik, title, subtitle, subtext }) => {
             <CustomTextField
               id="confirm_password"
               name="confirm_password"
-              type="password"
+              type={showConfirmPassword ? 'text' : 'password'}
               variant="outlined"
               placeholder="Repeat your password"
               value={values.confirm_password}
@@ -178,6 +198,20 @@ const AuthRegister = ({ formik, title, subtitle, subtext }) => {
               helperText={touched.confirm_password && errors.confirm_password}
               fullWidth
               required
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                      onClick={() => setShowConfirmPassword((prev) => !prev)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      edge="end"
+                    >
+                      {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
             />
           </Box>
         </Stack>

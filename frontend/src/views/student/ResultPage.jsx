@@ -70,9 +70,11 @@ const ResultPage = () => {
   const [detailedReport, setDetailedReport] = useState(null);
   const [evidencePreview, setEvidencePreview] = useState(null);
 
-  const fetchResultsData = async () => {
+  const fetchResultsData = async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) {
+        setLoading(true);
+      }
       setError(null);
       // Fetch exams list
       const examsResponse = await axiosInstance.get('/api/users/exam');
@@ -89,14 +91,22 @@ const ResultPage = () => {
       }
     } catch (err) {
       console.error('Error fetching results data:', err);
-      setError(err.response?.data?.message || 'Failed to load results');
+      if (!isBackground) {
+        setError(err.response?.data?.message || 'Failed to load results');
+      }
     } finally {
-      setLoading(false);
+      if (!isBackground) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     fetchResultsData();
+    const pollInterval = setInterval(() => {
+      fetchResultsData(true);
+    }, 3000);
+    return () => clearInterval(pollInterval);
   }, [userInfo]);
 
   const handleToggleVisibility = async (resultId) => {
@@ -447,7 +457,9 @@ const ResultPage = () => {
   );
 
   // Student View
-  if (userInfo?.role === 'student') {
+  const userRole = (userInfo?.role || '').toLowerCase();
+  const isStudent = userRole.includes('student') || !userRole.includes('teacher');
+  if (isStudent) {
     const totalExamsTaken = results.length;
     const avgScore = totalExamsTaken > 0
       ? (results.reduce((acc, curr) => acc + (curr.percentage || 0), 0) / totalExamsTaken).toFixed(1)

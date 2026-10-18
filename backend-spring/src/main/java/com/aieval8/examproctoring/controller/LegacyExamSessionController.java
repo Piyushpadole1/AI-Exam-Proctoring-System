@@ -137,7 +137,8 @@ public class LegacyExamSessionController {
             // Strict Teacher Isolation: A teacher must ONLY ever see their own exams
             exams = examRepository.findByTeacherId(resolvedUser.getId());
         } else {
-            exams = examRepository.findAll();
+            // Students only see active/published exams
+            exams = examRepository.findByStatus("PUBLISHED");
         }
 
         List<Map<String, Object>> result = new ArrayList<>();
@@ -163,12 +164,29 @@ public class LegacyExamSessionController {
 
             if (isStudent && resolvedUser != null) {
                 Optional<ExamEnrollment> enOpt = enrollmentRepository.findByExamIdAndStudentId(e.getId(), resolvedUser.getId());
-                String status = enOpt.map(en -> en.getStatus().name()).orElse("NOT_ENROLLED");
+                List<ExamAttempt> pastAttempts = attemptRepository.findByExamIdAndStudentId(e.getId(), resolvedUser.getId());
+                boolean hasAttempted = pastAttempts.stream().anyMatch(a ->
+                        a.getStatus() == AttemptStatus.SUBMITTED ||
+                        a.getStatus() == AttemptStatus.COMPLETED ||
+                        a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                        a.getStatus() == AttemptStatus.AUTO_SUBMITTED);
+
+                String status = "NOT_ENROLLED";
+                if (hasAttempted || (enOpt.isPresent() && enOpt.get().getStatus() == EnrollmentStatus.COMPLETED)) {
+                    status = "COMPLETED";
+                } else if (enOpt.isPresent()) {
+                    status = enOpt.get().getStatus().name();
+                }
+
                 map.put("enrollmentStatus", status);
                 map.put("isEnrolled", "ENROLLED".equals(status));
+                map.put("isCompleted", "COMPLETED".equals(status));
+                map.put("hasAttempted", hasAttempted);
             } else {
                 map.put("enrollmentStatus", "ENROLLED");
                 map.put("isEnrolled", true);
+                map.put("isCompleted", false);
+                map.put("hasAttempted", false);
             }
             result.add(map);
         }
@@ -214,12 +232,29 @@ public class LegacyExamSessionController {
 
         if (isStudent && resolvedUser != null) {
             Optional<ExamEnrollment> enOpt = enrollmentRepository.findByExamIdAndStudentId(e.getId(), resolvedUser.getId());
-            String status = enOpt.map(en -> en.getStatus().name()).orElse("NOT_ENROLLED");
+            List<ExamAttempt> pastAttempts = attemptRepository.findByExamIdAndStudentId(e.getId(), resolvedUser.getId());
+            boolean hasAttempted = pastAttempts.stream().anyMatch(a ->
+                    a.getStatus() == AttemptStatus.SUBMITTED ||
+                    a.getStatus() == AttemptStatus.COMPLETED ||
+                    a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                    a.getStatus() == AttemptStatus.AUTO_SUBMITTED);
+
+            String status = "NOT_ENROLLED";
+            if (hasAttempted || (enOpt.isPresent() && enOpt.get().getStatus() == EnrollmentStatus.COMPLETED)) {
+                status = "COMPLETED";
+            } else if (enOpt.isPresent()) {
+                status = enOpt.get().getStatus().name();
+            }
+
             map.put("enrollmentStatus", status);
             map.put("isEnrolled", "ENROLLED".equals(status));
+            map.put("isCompleted", "COMPLETED".equals(status));
+            map.put("hasAttempted", hasAttempted);
         } else {
             map.put("enrollmentStatus", "ENROLLED");
             map.put("isEnrolled", true);
+            map.put("isCompleted", false);
+            map.put("hasAttempted", false);
         }
 
         return ResponseEntity.ok(map);
@@ -287,29 +322,10 @@ public class LegacyExamSessionController {
 
         CustomUserDetails resolvedTeacher = resolveUser(teacherDetails);
         if (resolvedTeacher == null) {
-            User teacher = null;
-            if (body.get("userId") != null) {
-                try {
-                    teacher = userRepository.findById(Long.parseLong(body.get("userId").toString())).orElse(null);
-                } catch (Exception ignored) {}
-            }
-            if (teacher == null && body.get("teacherId") != null) {
-                try {
-                    teacher = userRepository.findById(Long.parseLong(body.get("teacherId").toString())).orElse(null);
-                } catch (Exception ignored) {}
-            }
-            if (teacher == null && body.get("email") != null) {
-                teacher = userRepository.findByEmail((String) body.get("email")).orElse(null);
-            }
-            if (teacher == null) {
-                teacher = userRepository.findAll().stream()
-                        .filter(u -> u.getRole() == Role.ROLE_TEACHER)
-                        .findFirst()
-                        .orElse(null);
-            }
-            if (teacher != null) {
-                resolvedTeacher = new CustomUserDetails(teacher);
-            }
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolvedTeacher.getRole()) && !"ROLE_ADMIN".equals(resolvedTeacher.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Teacher role required to create exams."));
         }
 
         ExamResponse res = examService.createExam(req, resolvedTeacher);
@@ -335,9 +351,20 @@ public class LegacyExamSessionController {
                                                                  @RequestBody Map<String, Object> body,
                                                                  @AuthenticationPrincipal CustomUserDetails teacherDetails) {
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only teachers can update exams."));
+        }
         Optional<Exam> examOpt = findExamByCodeOrId(examId);
         if (examOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Exam not found: " + examId));
+        }
+
+        Exam exam = examOpt.get();
+        if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
         }
 
         CreateExamRequest req = new CreateExamRequest();
@@ -366,6 +393,13 @@ public class LegacyExamSessionController {
             try { req.setCodingMarks(Double.parseDouble(body.get("codingMarks").toString().trim())); } catch (Exception ignored) {}
         }
 
+        if (req.getTotalQuestions() != null) {
+            long existingQuestions = questionRepository.countByExamId(examOpt.get().getId());
+            if (req.getTotalQuestions() < existingQuestions) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Cannot reduce total questions to " + req.getTotalQuestions() + " because this exam already has " + existingQuestions + " questions."));
+            }
+        }
+
         ExamResponse res = examService.updateExam(examOpt.get().getId(), req, resolved);
         return ResponseEntity.ok(Map.of("success", true, "data", res));
     }
@@ -391,6 +425,9 @@ public class LegacyExamSessionController {
             @PathVariable String examCode,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
         CustomUserDetails resolved = resolveUser(userDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
         Optional<Exam> examOpt = findExamByCodeOrId(examCode);
 
         if (examOpt.isEmpty()) {
@@ -398,11 +435,14 @@ public class LegacyExamSessionController {
         }
 
         Exam exam = examOpt.get();
-        if (resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
+        boolean isTeacher = "ROLE_TEACHER".equals(resolved.getRole());
+        boolean isStudent = "ROLE_STUDENT".equals(resolved.getRole());
+
+        if (isTeacher) {
+            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
             }
-        } else if (resolved != null && "ROLE_STUDENT".equals(resolved.getRole())) {
+        } else if (isStudent) {
             Optional<ExamEnrollment> enOpt = enrollmentRepository.findByExamIdAndStudentId(exam.getId(), resolved.getId());
             if (enOpt.isEmpty() || enOpt.get().getStatus() != EnrollmentStatus.ENROLLED) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You must be enrolled and approved to access questions."));
@@ -446,7 +486,7 @@ public class LegacyExamSessionController {
                         optMap.put("optionText", optText);
                         optMap.put("text", optText);
                         optMap.put("option", optText);
-                        optMap.put("isCorrect", isCor);
+                        optMap.put("isCorrect", isStudent ? false : isCor);
                         normalizedOptions.add(optMap);
                     }
                 }
@@ -456,7 +496,7 @@ public class LegacyExamSessionController {
 
             map.put("options", normalizedOptions);
             map.put("marks", q.getMarks());
-            map.put("correctOptionIndex", q.getCorrectOptionIndex());
+            map.put("correctOptionIndex", isStudent ? null : q.getCorrectOptionIndex());
             result.add(map);
         }
         return ResponseEntity.ok(result);
@@ -466,6 +506,13 @@ public class LegacyExamSessionController {
     public ResponseEntity<Map<String, Object>> createQuestion(@RequestBody Map<String, Object> body,
                                                                @AuthenticationPrincipal CustomUserDetails teacherDetails) {
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only teachers can add questions."));
+        }
+
         String examCode = (String) body.get("examId");
         Optional<Exam> examOpt = findExamByCodeOrId(examCode);
 
@@ -474,10 +521,14 @@ public class LegacyExamSessionController {
         }
 
         Exam exam = examOpt.get();
-        if (resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
-            }
+        if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
+        }
+
+        long currentCount = questionRepository.countByExamId(exam.getId());
+        int maxAllowed = exam.getTotalQuestions() != null ? exam.getTotalQuestions() : 0;
+        if (maxAllowed > 0 && currentCount >= maxAllowed) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Cannot add question: Exam question capacity (" + maxAllowed + ") has been reached."));
         }
 
         String questionText = (String) body.get("question");
@@ -526,9 +577,6 @@ public class LegacyExamSessionController {
         Question q = new Question(exam, questionText, optionsJson, correctIndex, marks);
         q = questionRepository.save(q);
 
-        exam.setTotalQuestions(exam.getTotalQuestions() + 1);
-        examRepository.save(exam);
-
         Map<String, Object> resp = new HashMap<>();
         resp.put("_id", q.getId().toString());
         resp.put("id", q.getId().toString());
@@ -549,16 +597,20 @@ public class LegacyExamSessionController {
             @RequestBody Map<String, Object> body,
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only teachers can update questions."));
+        }
         Optional<Question> qOpt = questionRepository.findById(questionId);
         if (qOpt.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         Question q = qOpt.get();
         Exam exam = q.getExam();
-        if (exam != null && resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
-            }
+        if (exam != null && exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
         }
         if (body.get("question") != null) q.setQuestionText((String) body.get("question"));
         if (body.get("options") != null) {
@@ -576,16 +628,20 @@ public class LegacyExamSessionController {
             @PathVariable Long questionId,
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only teachers can delete questions."));
+        }
         Optional<Question> qOpt = questionRepository.findById(questionId);
         if (qOpt.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         Question q = qOpt.get();
         Exam exam = q.getExam();
-        if (exam != null && resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
-            }
+        if (exam != null && exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
         }
         questionRepository.delete(q);
         if (exam != null && exam.getTotalQuestions() > 0) {
@@ -605,17 +661,23 @@ public class LegacyExamSessionController {
         return a.equals(e);
     }
 
-    @PostMapping("/api/coding/question")
+    @PostMapping({"/api/coding/question", "/api/coding/questions"})
     public ResponseEntity<Map<String, Object>> createCodingQuestion(
             @RequestBody Map<String, Object> body,
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only teachers can create coding questions."));
+        }
         String examId = String.valueOf(body.get("examId"));
         Optional<Exam> examOpt = findExamByCodeOrId(examId);
 
-        if (examOpt.isPresent() && resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
+        if (examOpt.isPresent()) {
             Exam exam = examOpt.get();
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
+            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
             }
         }
@@ -694,15 +756,21 @@ public class LegacyExamSessionController {
             @RequestBody Map<String, Object> body,
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only teachers can update coding questions."));
+        }
         Optional<CodingQuestion> opt = codingQuestionRepository.findById(id);
         if (opt.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         CodingQuestion cq = opt.get();
         Optional<Exam> examOpt = findExamByCodeOrId(cq.getExamId());
-        if (examOpt.isPresent() && resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
+        if (examOpt.isPresent()) {
             Exam exam = examOpt.get();
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
+            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
             }
         }
@@ -736,15 +804,21 @@ public class LegacyExamSessionController {
             @PathVariable Long id,
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only teachers can delete coding questions."));
+        }
         Optional<CodingQuestion> opt = codingQuestionRepository.findById(id);
         if (opt.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         CodingQuestion cq = opt.get();
         Optional<Exam> examOpt = findExamByCodeOrId(cq.getExamId());
-        if (examOpt.isPresent() && resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
+        if (examOpt.isPresent()) {
             Exam exam = examOpt.get();
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
+            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
             }
         }
@@ -965,8 +1039,20 @@ public class LegacyExamSessionController {
                     attempt.setScore(newScore);
                     double totalMax = exam.getTotalMarks() != null && exam.getTotalMarks() > 0 ? exam.getTotalMarks() : 100.0;
                     attempt.setPercentage(Math.min(100.0, Math.round((newScore / totalMax) * 1000.0) / 10.0));
-                    attempt.setPassed(newScore >= exam.getPassingMarks());
+                    attempt.setPassed(newScore >= (exam.getPassingMarks() != null ? exam.getPassingMarks() : 40.0));
+                    attempt.setStatus(AttemptStatus.SUBMITTED);
+                    attempt.setSubmittedAt(LocalDateTime.now());
                     attemptRepository.save(attempt);
+
+                    // Mark student enrollment as COMPLETED upon submitting exam
+                    try {
+                        enrollmentRepository.findByExamIdAndStudentId(exam.getId(), resolved.getId())
+                                .ifPresent(en -> {
+                                    en.setStatus(EnrollmentStatus.COMPLETED);
+                                    en.setUpdatedAt(LocalDateTime.now());
+                                    enrollmentRepository.save(en);
+                                });
+                    } catch (Exception ignored) {}
                 }
             }
         }
@@ -1014,15 +1100,21 @@ public class LegacyExamSessionController {
         return ResponseEntity.ok(Map.of("success", true, "count", data.size(), "data", data));
     }
 
-    @GetMapping("/api/users/results/user")
+    @GetMapping({"/api/users/results/user", "/api/users/results/my-results"})
     public ResponseEntity<Map<String, Object>> getUserResults(@AuthenticationPrincipal CustomUserDetails userDetails) {
         CustomUserDetails resolved = resolveUser(userDetails);
         List<ExamAttempt> attempts;
         if (resolved != null) {
-            attempts = attemptRepository.findByStudentId(resolved.getId());
+            attempts = new ArrayList<>(attemptRepository.findByStudentId(resolved.getId()));
         } else {
-            attempts = attemptRepository.findAll();
+            attempts = new ArrayList<>(attemptRepository.findAll());
         }
+
+        attempts.sort((a, b) -> {
+            LocalDateTime t1 = a.getSubmittedAt() != null ? a.getSubmittedAt() : (a.getCreatedAt() != null ? a.getCreatedAt() : LocalDateTime.MIN);
+            LocalDateTime t2 = b.getSubmittedAt() != null ? b.getSubmittedAt() : (b.getCreatedAt() != null ? b.getCreatedAt() : LocalDateTime.MIN);
+            return t2.compareTo(t1);
+        });
 
         List<Map<String, Object>> data = new ArrayList<>();
         for (ExamAttempt a : attempts) {
@@ -1154,7 +1246,13 @@ public class LegacyExamSessionController {
         return item;
     }
 
-    @GetMapping({"/api/users/results/{attemptId}/detailed-report", "/api/results/{attemptId}/detailed-report"})
+    @GetMapping({
+            "/api/users/results/{attemptId}/detailed-report",
+            "/api/results/{attemptId}/detailed-report",
+            "/api/users/results/attempt/{attemptId}",
+            "/api/results/attempt/{attemptId}",
+            "/api/users/results/{attemptId}"
+    })
     public ResponseEntity<Map<String, Object>> getDetailedResultReport(
             @PathVariable Long attemptId,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
@@ -1228,9 +1326,25 @@ public class LegacyExamSessionController {
             qr.put("options", opts);
             qr.put("correctAnswer", correctAnsText);
 
-            String studentAns = answers.get(q.getId().toString());
-            if (studentAns == null) {
-                studentAns = answers.get(String.valueOf(q.getId()));
+            String studentAns = null;
+            if (answers.containsKey(q.getId().toString())) {
+                studentAns = String.valueOf(answers.get(q.getId().toString()));
+            } else if (answers.containsKey(String.valueOf(q.getId()))) {
+                studentAns = String.valueOf(answers.get(String.valueOf(q.getId())));
+            } else if (answers.containsKey(String.valueOf(qIdx))) {
+                studentAns = String.valueOf(answers.get(String.valueOf(qIdx)));
+            } else if (answers.containsKey(String.valueOf(qIdx + 1))) {
+                studentAns = String.valueOf(answers.get(String.valueOf(qIdx + 1)));
+            } else {
+                for (Map.Entry<String, String> entry : answers.entrySet()) {
+                    if (entry.getKey() != null && (
+                            entry.getKey().trim().equalsIgnoreCase(q.getId().toString()) ||
+                            entry.getKey().trim().equalsIgnoreCase(String.valueOf(qIdx)) ||
+                            entry.getKey().trim().equalsIgnoreCase(q.getQuestionText().trim()))) {
+                        studentAns = String.valueOf(entry.getValue());
+                        break;
+                    }
+                }
             }
 
             String studentAnsDisplay = "Not Answered";
@@ -1238,20 +1352,52 @@ public class LegacyExamSessionController {
 
             if (studentAns != null && !studentAns.trim().isEmpty()) {
                 answeredCount++;
+                String cleanAns = studentAns.trim();
+
+                // 1. Direct index matching (0-based)
                 try {
-                    int selIdx = Integer.parseInt(studentAns.trim());
+                    int selIdx = Integer.parseInt(cleanAns);
                     if (selIdx >= 0 && selIdx < opts.size()) {
                         studentAnsDisplay = (String) opts.get(selIdx).get("text");
+                    } else if (selIdx > 0 && (selIdx - 1) < opts.size()) {
+                        studentAnsDisplay = (String) opts.get(selIdx - 1).get("text");
                     } else {
-                        studentAnsDisplay = studentAns;
+                        studentAnsDisplay = cleanAns;
                     }
-                    if (selIdx == q.getCorrectOptionIndex()) {
+
+                    if (selIdx == q.getCorrectOptionIndex() || selIdx == (q.getCorrectOptionIndex() + 1)) {
                         isCorrect = true;
                     }
-                } catch (NumberFormatException e) {
-                    studentAnsDisplay = studentAns;
-                    if (!correctAnsText.isEmpty() && correctAnsText.trim().equalsIgnoreCase(studentAns.trim())) {
-                        isCorrect = true;
+                } catch (NumberFormatException ignored) {}
+
+                // 2. Letter matching (A, B, C, D)
+                if (!isCorrect && cleanAns.length() == 1) {
+                    char c = Character.toUpperCase(cleanAns.charAt(0));
+                    if (c >= 'A' && c <= 'Z') {
+                        int letterIdx = c - 'A';
+                        if (letterIdx >= 0 && letterIdx < opts.size()) {
+                            studentAnsDisplay = (String) opts.get(letterIdx).get("text");
+                        }
+                        if (letterIdx == q.getCorrectOptionIndex()) {
+                            isCorrect = true;
+                        }
+                    }
+                }
+
+                // 3. Option text or ID matching
+                if (!isCorrect) {
+                    for (int i = 0; i < opts.size(); i++) {
+                        String optTxt = (String) opts.get(i).get("text");
+                        if (optTxt != null && optTxt.trim().equalsIgnoreCase(cleanAns)) {
+                            studentAnsDisplay = optTxt;
+                            if (i == q.getCorrectOptionIndex()) {
+                                isCorrect = true;
+                            }
+                            break;
+                        }
+                    }
+                    if (studentAnsDisplay.equals("Not Answered")) {
+                        studentAnsDisplay = cleanAns;
                     }
                 }
             }
@@ -1270,55 +1416,59 @@ public class LegacyExamSessionController {
         List<Map<String, Object>> violationList = new ArrayList<>();
         Optional<ProctoringSession> sOpt = sessionRepository.findByAttemptId(a.getId());
         if (sOpt.isPresent()) {
-            List<ProctoringEvent> events = eventRepository.findBySessionIdOrderByTimestampAsc(sOpt.get().getId());
+            List<ProctoringEvent> events = eventRepository.findBySessionIdOrderByTimestampAsc(sOpt.get().getId()).stream()
+                    .filter(ev -> ev.getPenaltyPoints() != null && ev.getPenaltyPoints() > 0 &&
+                                  !ev.getEventType().equalsIgnoreCase("EXAM_STARTED") &&
+                                  !ev.getEventType().equalsIgnoreCase("EXAM_SUBMITTED"))
+                    .toList();
             for (ProctoringEvent ev : events) {
-                violationList.add(Map.of(
-                        "id", ev.getId().toString(),
-                        "eventType", ev.getEventType(),
-                        "severity", ev.getSeverity().name(),
-                        "penaltyPoints", ev.getPenaltyPoints(),
-                        "description", ev.getDescription() != null ? ev.getDescription() : "",
-                        "evidenceUrl", ev.getEvidenceUrl() != null ? ev.getEvidenceUrl() : "",
-                        "timestamp", ev.getTimestamp().toString()
-                ));
+                Map<String, Object> vMap = new HashMap<>();
+                vMap.put("id", ev.getId() != null ? ev.getId().toString() : "");
+                vMap.put("eventType", ev.getEventType() != null ? ev.getEventType() : "");
+                vMap.put("severity", ev.getSeverity() != null ? ev.getSeverity().name() : "LOW");
+                vMap.put("penaltyPoints", ev.getPenaltyPoints() != null ? ev.getPenaltyPoints() : 1);
+                vMap.put("description", ev.getDescription() != null ? ev.getDescription() : "");
+                vMap.put("evidenceUrl", ev.getEvidenceUrl() != null ? ev.getEvidenceUrl() : "");
+                vMap.put("timestamp", ev.getTimestamp() != null ? ev.getTimestamp().toString() : "");
+                violationList.add(vMap);
             }
         }
 
         Map<String, Object> resp = new HashMap<>();
-        resp.put("attemptId", a.getId().toString());
+        resp.put("attemptId", a.getId() != null ? a.getId().toString() : "");
         resp.put("score", a.getScore() != null ? a.getScore() : 0.0);
-        resp.put("totalMarks", exam != null ? exam.getTotalMarks() : (a.getScore() != null ? a.getScore() : 0.0));
+        resp.put("totalMarks", exam != null && exam.getTotalMarks() != null ? exam.getTotalMarks() : (a.getScore() != null ? a.getScore() : 0.0));
         resp.put("percentage", a.getPercentage() != null ? a.getPercentage() : 0.0);
         resp.put("passed", a.getPassed() != null ? a.getPassed() : false);
-        resp.put("status", a.getStatus().name());
-        resp.put("submittedAt", a.getSubmittedAt() != null ? a.getSubmittedAt().toString() : a.getCreatedAt().toString());
+        resp.put("status", a.getStatus() != null ? a.getStatus().name() : "SUBMITTED");
+        resp.put("submittedAt", a.getSubmittedAt() != null ? a.getSubmittedAt().toString() : (a.getCreatedAt() != null ? a.getCreatedAt().toString() : LocalDateTime.now().toString()));
 
         if (student != null) {
-            resp.put("student", Map.of(
-                    "id", student.getId().toString(),
-                    "name", student.getName(),
-                    "email", student.getEmail()
-            ));
+            Map<String, Object> sMap = new HashMap<>();
+            sMap.put("id", student.getId() != null ? student.getId().toString() : "");
+            sMap.put("name", student.getName() != null ? student.getName() : "");
+            sMap.put("email", student.getEmail() != null ? student.getEmail() : "");
+            resp.put("student", sMap);
         }
 
         if (exam != null) {
-            resp.put("exam", Map.of(
-                    "id", exam.getId().toString(),
-                    "examCode", exam.getExamCode(),
-                    "examName", exam.getExamName(),
-                    "subject", exam.getSubject() != null ? exam.getSubject() : "",
-                    "passingMarks", exam.getPassingMarks() != null ? exam.getPassingMarks() : 40.0,
-                    "totalMarks", exam.getTotalMarks()
-            ));
+            Map<String, Object> eMap = new HashMap<>();
+            eMap.put("id", exam.getId() != null ? exam.getId().toString() : "");
+            eMap.put("examCode", exam.getExamCode() != null ? exam.getExamCode() : "");
+            eMap.put("examName", exam.getExamName() != null ? exam.getExamName() : "");
+            eMap.put("subject", exam.getSubject() != null ? exam.getSubject() : "");
+            eMap.put("passingMarks", exam.getPassingMarks() != null ? exam.getPassingMarks() : 40.0);
+            eMap.put("totalMarks", exam.getTotalMarks() != null ? exam.getTotalMarks() : 0.0);
+            resp.put("exam", eMap);
         }
 
-        resp.put("summary", Map.of(
-                "totalQuestions", questions.size(),
-                "answeredCount", answeredCount,
-                "correctCount", correctCount,
-                "wrongCount", answeredCount - correctCount,
-                "totalViolations", violationList.size()
-        ));
+        Map<String, Object> summaryMap = new HashMap<>();
+        summaryMap.put("totalQuestions", questions.size());
+        summaryMap.put("answeredCount", answeredCount);
+        summaryMap.put("correctCount", correctCount);
+        summaryMap.put("wrongCount", answeredCount - correctCount);
+        summaryMap.put("totalViolations", violationList.size());
+        resp.put("summary", summaryMap);
 
         resp.put("questions", questionReports);
         resp.put("violations", violationList);
@@ -1328,7 +1478,12 @@ public class LegacyExamSessionController {
 
     // ── Cheating Logs (/api/users/cheatingLogs/**, /api/cheatingLogs/**) ───
 
-    @GetMapping({"/api/users/cheatingLogs/{examId}", "/api/cheatingLogs/{examId}"})
+    @GetMapping({
+            "/api/users/cheatingLogs/{examId}",
+            "/api/cheatingLogs/{examId}",
+            "/api/users/cheating-logs/{examId}",
+            "/api/cheating-logs/{examId}"
+    })
     public ResponseEntity<List<Map<String, Object>>> getCheatingLogs(
             @PathVariable String examId,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
@@ -1364,18 +1519,20 @@ public class LegacyExamSessionController {
                     if (ps.getIntegrityScore() != null) fairness = ps.getIntegrityScore();
                     List<ProctoringEvent> events = eventRepository.findBySessionIdOrderByTimestampAsc(ps.getId());
                     for (ProctoringEvent ev : events) {
+                        if (ev.getPenaltyPoints() == null || ev.getPenaltyPoints() <= 0) continue;
                         String type = ev.getEventType().toUpperCase();
+                        if (type.contains("START") || type.contains("SUBMIT")) continue;
                         if (type.contains("NO_FACE") || type.contains("NOT_VISIBLE")) noFace++;
                         else if (type.contains("MULTIPLE")) multiFace++;
                         else if (type.contains("CELL") || type.contains("PHONE")) cellPhone++;
                         else prohibited++;
 
                         if (ev.getEvidenceUrl() != null && !ev.getEvidenceUrl().isEmpty()) {
-                            screenshots.add(Map.of(
-                                    "url", ev.getEvidenceUrl(),
-                                    "type", ev.getEventType(),
-                                    "detectedAt", ev.getTimestamp().toString()
-                            ));
+                            Map<String, Object> sc = new HashMap<>();
+                            sc.put("url", ev.getEvidenceUrl());
+                            sc.put("type", ev.getEventType() != null ? ev.getEventType() : "");
+                            sc.put("detectedAt", ev.getTimestamp() != null ? ev.getTimestamp().toString() : "");
+                            screenshots.add(sc);
                         }
                     }
                 }
@@ -1398,7 +1555,16 @@ public class LegacyExamSessionController {
         }
 
         // 2. Overlay / Merge with any entries directly in cheatingLogRepository
-        List<CheatingLogEntry> entries = cheatingLogRepository.findByExamIdOrderByCreatedAtDesc(examId);
+        List<CheatingLogEntry> entries = new ArrayList<>(cheatingLogRepository.findByExamIdOrderByCreatedAtDesc(examId));
+        if (examOpt.isPresent()) {
+            Exam ex = examOpt.get();
+            if (ex.getExamCode() != null && !ex.getExamCode().equalsIgnoreCase(examId)) {
+                entries.addAll(cheatingLogRepository.findByExamIdOrderByCreatedAtDesc(ex.getExamCode()));
+            }
+            if (ex.getId() != null && !ex.getId().toString().equalsIgnoreCase(examId)) {
+                entries.addAll(cheatingLogRepository.findByExamIdOrderByCreatedAtDesc(ex.getId().toString()));
+            }
+        }
         for (CheatingLogEntry e : entries) {
             String emailKey = e.getEmail() != null ? e.getEmail().toLowerCase() : "";
             Map<String, Object> map = logsByEmail.get(emailKey);
@@ -1417,7 +1583,7 @@ public class LegacyExamSessionController {
                 map.put("cellPhoneCount", cp);
                 map.put("prohibitedObjectCount", pr);
                 int totalV = nf + mf + cp + pr;
-                map.put("fairnessScore", Math.max(0, 100 - (totalV * 15)));
+                map.put("fairnessScore", Math.max(0, Math.round(((6.0 - Math.min(6, totalV)) / 6.0) * 100.0)));
                 map.put("totalViolations", totalV);
                 try {
                     map.put("screenshots", objectMapper.readValue(e.getScreenshotsJson(), List.class));
@@ -1430,11 +1596,13 @@ public class LegacyExamSessionController {
                 int multiFace = Math.max(((Number) map.get("multipleFaceCount")).intValue(), e.getMultipleFaceCount() != null ? e.getMultipleFaceCount() : 0);
                 int cellPhone = Math.max(((Number) map.get("cellPhoneCount")).intValue(), e.getCellPhoneCount() != null ? e.getCellPhoneCount() : 0);
                 int prohibited = Math.max(((Number) map.get("prohibitedObjectCount")).intValue(), e.getProhibitedObjectCount() != null ? e.getProhibitedObjectCount() : 0);
+                int totalVMerged = noFace + multiFace + cellPhone + prohibited;
                 map.put("noFaceCount", noFace);
                 map.put("multipleFaceCount", multiFace);
                 map.put("cellPhoneCount", cellPhone);
                 map.put("prohibitedObjectCount", prohibited);
-                map.put("totalViolations", noFace + multiFace + cellPhone + prohibited);
+                map.put("totalViolations", totalVMerged);
+                map.put("fairnessScore", Math.max(0, Math.round(((6.0 - Math.min(6, totalVMerged)) / 6.0) * 100.0)));
                 try {
                     List<Map<String, Object>> existing = new ArrayList<>((List<Map<String, Object>>) map.get("screenshots"));
                     List<Map<String, Object>> fromEntry = objectMapper.readValue(e.getScreenshotsJson(), List.class);
@@ -1454,7 +1622,12 @@ public class LegacyExamSessionController {
         return ResponseEntity.ok(result);
     }
 
-    @PostMapping({"/api/users/cheatingLogs", "/api/cheatingLogs"})
+    @PostMapping({
+            "/api/users/cheatingLogs",
+            "/api/cheatingLogs",
+            "/api/users/cheating-logs",
+            "/api/cheating-logs"
+    })
     public ResponseEntity<Map<String, Object>> saveCheatingLog(@RequestBody Map<String, Object> body) {
         String examId = String.valueOf(body.get("examId"));
         String username = (String) body.get("username");
@@ -1499,6 +1672,12 @@ public class LegacyExamSessionController {
             @AuthenticationPrincipal CustomUserDetails studentDetails) {
 
         CustomUserDetails resolved = resolveUser(studentDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_STUDENT".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only students can start exam sessions."));
+        }
         String examCode = (String) body.get("examId");
         String examPassword = body.get("examPassword") != null ? (String) body.get("examPassword") : (String) body.get("password");
         String deviceInfo = request.getHeader("User-Agent");
@@ -1625,6 +1804,18 @@ public class LegacyExamSessionController {
         attempt.setSubmittedAt(LocalDateTime.now());
         attempt = attemptRepository.save(attempt);
 
+        // Mark student enrollment as COMPLETED on exam termination
+        if (attempt.getExam() != null && attempt.getStudent() != null) {
+            try {
+                enrollmentRepository.findByExamIdAndStudentId(attempt.getExam().getId(), attempt.getStudent().getId())
+                        .ifPresent(en -> {
+                            en.setStatus(EnrollmentStatus.COMPLETED);
+                            en.setUpdatedAt(LocalDateTime.now());
+                            enrollmentRepository.save(en);
+                        });
+            } catch (Exception ignored) {}
+        }
+
         sessionRepository.findByAttemptId(attempt.getId()).ifPresent(s -> {
             s.setVerdict("TERMINATED");
             s.setEndedAt(LocalDateTime.now());
@@ -1691,6 +1882,28 @@ public class LegacyExamSessionController {
             }
 
             ExamEnrollment enrollment = enrollmentOpt.get();
+            if (enrollment.getStatus() == EnrollmentStatus.COMPLETED) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "error", "Access Denied: You have already completed and submitted this examination. Multiple attempts are not permitted.",
+                        "enrolled", false,
+                        "status", "COMPLETED"
+                ));
+            }
+
+            List<ExamAttempt> pastAttempts = attemptRepository.findByExamIdAndStudentId(exam.getId(), resolved.getId());
+            boolean alreadySubmitted = pastAttempts.stream().anyMatch(a ->
+                    a.getStatus() == AttemptStatus.SUBMITTED ||
+                    a.getStatus() == AttemptStatus.COMPLETED ||
+                    a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                    a.getStatus() == AttemptStatus.AUTO_SUBMITTED);
+            if (alreadySubmitted) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "error", "Access Denied: You have already completed and submitted this examination. Multiple attempts are not permitted.",
+                        "enrolled", false,
+                        "status", "COMPLETED"
+                ));
+            }
+
             if (enrollment.getStatus() == EnrollmentStatus.PENDING) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
                         "error", "Access Denied: Your enrollment request is pending approval by the instructor.",
@@ -1758,6 +1971,9 @@ public class LegacyExamSessionController {
         if (resolved == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
         }
+        if (!"ROLE_STUDENT".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only students can request enrollment."));
+        }
 
         Optional<Exam> examOpt = findExamByCodeOrId(examCode);
         if (examOpt.isEmpty()) {
@@ -1770,7 +1986,21 @@ public class LegacyExamSessionController {
             return ResponseEntity.badRequest().body(Map.of("error", "Student record not found."));
         }
 
+        List<ExamAttempt> pastAttempts = attemptRepository.findByExamIdAndStudentId(exam.getId(), student.getId());
+        boolean alreadySubmitted = pastAttempts.stream().anyMatch(a ->
+                a.getStatus() == AttemptStatus.SUBMITTED ||
+                a.getStatus() == AttemptStatus.COMPLETED ||
+                a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                a.getStatus() == AttemptStatus.AUTO_SUBMITTED);
+
         Optional<ExamEnrollment> enOpt = enrollmentRepository.findByExamIdAndStudentId(exam.getId(), student.getId());
+        if (alreadySubmitted || (enOpt.isPresent() && enOpt.get().getStatus() == EnrollmentStatus.COMPLETED)) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "You have already completed this exam and cannot re-enroll.",
+                    "status", "COMPLETED"
+            ));
+        }
+
         ExamEnrollment enrollment;
         if (enOpt.isPresent()) {
             enrollment = enOpt.get();
@@ -1791,25 +2021,48 @@ public class LegacyExamSessionController {
         ));
     }
 
-    @GetMapping("/api/users/exam/{examCode}/enrollment-requests")
+    @GetMapping({
+            "/api/users/exam/{examCode}/enrollment-requests",
+            "/api/users/exam/pending-requests",
+            "/api/users/exam/all/enrollment-requests"
+    })
     public ResponseEntity<List<Map<String, Object>>> getEnrollmentRequests(
-            @PathVariable String examCode,
+            @PathVariable(required = false) String examCode,
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
 
         CustomUserDetails resolved = resolveUser(teacherDetails);
-        Optional<Exam> examOpt = findExamByCodeOrId(examCode);
-        if (examOpt.isEmpty()) {
-            return ResponseEntity.ok(Collections.emptyList());
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        List<ExamEnrollment> requests = new ArrayList<>();
 
-        Exam exam = examOpt.get();
-        if (resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        if (examCode == null || "all".equalsIgnoreCase(examCode) || "pending-requests".equalsIgnoreCase(examCode)) {
+            if ("ROLE_TEACHER".equals(resolved.getRole())) {
+                requests = enrollmentRepository.findByExamTeacherIdAndStatus(resolved.getId(), EnrollmentStatus.PENDING);
+            } else {
+                requests = enrollmentRepository.findAll().stream()
+                        .filter(r -> r.getStatus() == EnrollmentStatus.PENDING)
+                        .toList();
             }
+        } else {
+            Optional<Exam> examOpt = findExamByCodeOrId(examCode);
+            if (examOpt.isEmpty()) {
+                return ResponseEntity.ok(Collections.emptyList());
+            }
+
+            Exam exam = examOpt.get();
+            if ("ROLE_TEACHER".equals(resolved.getRole())) {
+                if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+                }
+            }
+
+            requests = enrollmentRepository.findByExamId(exam.getId());
         }
 
-        List<ExamEnrollment> requests = enrollmentRepository.findByExamId(exam.getId());
         List<Map<String, Object>> result = new ArrayList<>();
         for (ExamEnrollment req : requests) {
             User s = req.getStudent();
@@ -1823,7 +2076,10 @@ public class LegacyExamSessionController {
             map.put("email", s.getEmail());
             map.put("studentIdNumber", s.getStudentIdNumber() != null ? s.getStudentIdNumber() : "—");
             map.put("status", req.getStatus().name());
-            map.put("requestedAt", req.getEnrolledAt() != null ? req.getEnrolledAt().toString() : req.getCreatedAt().toString());
+            map.put("examId", req.getExam() != null ? req.getExam().getExamCode() : "");
+            map.put("examCode", req.getExam() != null ? req.getExam().getExamCode() : "");
+            map.put("examName", req.getExam() != null ? req.getExam().getExamName() : "");
+            map.put("requestedAt", req.getEnrolledAt() != null ? req.getEnrolledAt().toString() : (req.getCreatedAt() != null ? req.getCreatedAt().toString() : ""));
             result.add(map);
         }
         return ResponseEntity.ok(result);
@@ -1836,16 +2092,20 @@ public class LegacyExamSessionController {
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
 
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only teachers can approve students."));
+        }
         Optional<Exam> examOpt = findExamByCodeOrId(examCode);
         if (examOpt.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Exam not found"));
         }
 
         Exam exam = examOpt.get();
-        if (resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
-            }
+        if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
         }
 
         User student = userRepository.findById(studentId).orElse(null);
@@ -1872,16 +2132,20 @@ public class LegacyExamSessionController {
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
 
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only teachers can reject students."));
+        }
         Optional<Exam> examOpt = findExamByCodeOrId(examCode);
         if (examOpt.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Exam not found"));
         }
 
         Exam exam = examOpt.get();
-        if (resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
-            }
+        if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
         }
 
         ExamEnrollment en = enrollmentRepository.findByExamIdAndStudentId(exam.getId(), studentId).orElse(null);
@@ -1898,6 +2162,13 @@ public class LegacyExamSessionController {
     @GetMapping("/api/users/students")
     public ResponseEntity<List<Map<String, Object>>> getAvailableStudentsList(
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
+        CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         List<User> students = userRepository.findAll().stream()
                 .filter(u -> u.getRole() == Role.ROLE_STUDENT)
                 .toList();
@@ -1923,6 +2194,12 @@ public class LegacyExamSessionController {
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
 
         CustomUserDetails resolved = resolveUser(teacherDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (!"ROLE_TEACHER".equals(resolved.getRole()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         Optional<Exam> examOpt = findExamByCodeOrId(examCode);
 
         if (examOpt.isEmpty()) {
@@ -1930,10 +2207,8 @@ public class LegacyExamSessionController {
         }
 
         Exam exam = examOpt.get();
-        if (resolved != null && "ROLE_TEACHER".equals(resolved.getRole())) {
-            if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-            }
+        if (exam.getTeacher() != null && !exam.getTeacher().getId().equals(resolved.getId()) && !"ROLE_ADMIN".equals(resolved.getRole())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
         List<ExamEnrollment> enrollments = enrollmentRepository.findByExamId(exam.getId());
@@ -1954,17 +2229,18 @@ public class LegacyExamSessionController {
         return ResponseEntity.ok(result);
     }
 
-    @PostMapping("/api/users/exam/{examCode}/enroll-student")
+    @PostMapping({"/api/users/exam/{examCode}/enroll-student", "/api/users/exam/enroll-student"})
     public ResponseEntity<Map<String, Object>> enrollStudentInExam(
-            @PathVariable String examCode,
+            @PathVariable(required = false) String examCode,
             @RequestBody Map<String, String> body,
             @AuthenticationPrincipal CustomUserDetails teacherDetails) {
 
         CustomUserDetails resolved = resolveUser(teacherDetails);
-        Optional<Exam> examOpt = findExamByCodeOrId(examCode);
+        String targetCode = (examCode != null && !examCode.isEmpty()) ? examCode : (body != null ? body.get("examId") : null);
+        Optional<Exam> examOpt = findExamByCodeOrId(targetCode);
 
         if (examOpt.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Exam not found: " + examCode));
+            return ResponseEntity.badRequest().body(Map.of("error", "Exam not found: " + (targetCode != null ? targetCode : "unknown")));
         }
 
         Exam exam = examOpt.get();
@@ -2030,5 +2306,151 @@ public class LegacyExamSessionController {
         enrollmentService.unenrollStudent(exam.getId(), studentId, resolved);
 
         return ResponseEntity.ok(Map.of("success", true, "message", "Student unenrolled successfully."));
+    }
+
+    @GetMapping("/api/users/student/dashboard")
+    public ResponseEntity<Map<String, Object>> getLegacyStudentDashboard(@AuthenticationPrincipal CustomUserDetails userDetails) {
+        CustomUserDetails resolved = resolveUser(userDetails);
+        if (resolved == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+        }
+        User student = userRepository.findById(resolved.getId())
+                .orElse(null);
+        if (student == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Student not found"));
+        }
+
+        List<ExamEnrollment> enrollments = enrollmentRepository.findByStudentId(student.getId());
+        List<ExamAttempt> attempts = attemptRepository.findByStudentId(student.getId());
+        List<Exam> publishedExams = examRepository.findByStatus("PUBLISHED");
+
+        long enrolledExamsCount = enrollments.stream()
+                .filter(e -> e.getStatus() == EnrollmentStatus.ENROLLED)
+                .count();
+
+        long eligibleExamsCount = publishedExams.size();
+
+        LocalDateTime now = LocalDateTime.now();
+        long upcomingExamsCount = enrollments.stream()
+                .filter(e -> e.getStatus() == EnrollmentStatus.ENROLLED)
+                .filter(e -> e.getExam() != null && (
+                        (e.getExam().getStartTime() != null && e.getExam().getStartTime().isAfter(now)) ||
+                        (e.getExam().getExamDate() != null && e.getExam().getExamDate().isAfter(now))
+                ))
+                .count();
+
+        long examsAppearedCount = attempts.size();
+
+        List<ExamAttempt> completedAttempts = attempts.stream()
+                .filter(a -> a.getStatus() == AttemptStatus.SUBMITTED ||
+                             a.getStatus() == AttemptStatus.COMPLETED ||
+                             a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                             a.getStatus() == AttemptStatus.AUTO_SUBMITTED)
+                .toList();
+
+        long examsCompletedCount = completedAttempts.size();
+
+        double averageScore = completedAttempts.isEmpty() ? 0.0 :
+                completedAttempts.stream()
+                        .mapToDouble(a -> a.getPercentage() != null ? a.getPercentage() : 0.0)
+                        .average()
+                        .orElse(0.0);
+        averageScore = Math.round(averageScore * 10.0) / 10.0;
+
+        long passCount = completedAttempts.stream()
+                .filter(a -> Boolean.TRUE.equals(a.getPassed()))
+                .count();
+
+        long failCount = completedAttempts.stream()
+                .filter(a -> Boolean.FALSE.equals(a.getPassed()))
+                .count();
+
+        long totalViolations = 0;
+        for (ExamAttempt a : attempts) {
+            Optional<ProctoringSession> sessOpt = sessionRepository.findByAttemptId(a.getId());
+            if (sessOpt.isPresent()) {
+                totalViolations += eventRepository.countBySessionId(sessOpt.get().getId());
+            }
+        }
+
+        List<Map<String, Object>> recentResults = new ArrayList<>();
+        List<ExamAttempt> sortedCompleted = new ArrayList<>(completedAttempts);
+        sortedCompleted.sort((a, b) -> {
+            LocalDateTime t1 = a.getSubmittedAt() != null ? a.getSubmittedAt() : a.getStartedAt();
+            LocalDateTime t2 = b.getSubmittedAt() != null ? b.getSubmittedAt() : b.getStartedAt();
+            if (t1 == null && t2 == null) return 0;
+            if (t1 == null) return 1;
+            if (t2 == null) return -1;
+            return t2.compareTo(t1);
+        });
+
+        int limit = Math.min(sortedCompleted.size(), 6);
+        for (int i = 0; i < limit; i++) {
+            ExamAttempt a = sortedCompleted.get(i);
+            Map<String, Object> r = new HashMap<>();
+            r.put("attemptId", a.getId());
+            r.put("examId", a.getExam() != null ? a.getExam().getExamCode() : "");
+            r.put("examName", a.getExam() != null ? a.getExam().getExamName() : "Exam");
+            r.put("subject", a.getExam() != null ? a.getExam().getSubject() : "");
+            r.put("score", a.getScore());
+            r.put("totalMarks", a.getExam() != null ? a.getExam().getTotalMarks() : 100.0);
+            r.put("passingMarks", a.getExam() != null ? a.getExam().getPassingMarks() : 40.0);
+            r.put("percentage", a.getPercentage());
+            r.put("passed", a.getPassed());
+            r.put("status", a.getStatus().name());
+            r.put("submittedAt", a.getSubmittedAt() != null ? a.getSubmittedAt().toString() : (a.getStartedAt() != null ? a.getStartedAt().toString() : ""));
+
+            long vCount = 0;
+            Optional<ProctoringSession> sess = sessionRepository.findByAttemptId(a.getId());
+            if (sess.isPresent()) {
+                vCount = eventRepository.countBySessionId(sess.get().getId());
+            }
+            r.put("violationsCount", vCount);
+            recentResults.add(r);
+        }
+
+        List<Map<String, Object>> upcomingExams = new ArrayList<>();
+        for (ExamEnrollment en : enrollments) {
+            if (en.getStatus() == EnrollmentStatus.ENROLLED && en.getExam() != null) {
+                Exam ex = en.getExam();
+                Map<String, Object> ue = new HashMap<>();
+                ue.put("examId", ex.getExamCode());
+                ue.put("examName", ex.getExamName());
+                ue.put("subject", ex.getSubject());
+                ue.put("duration", ex.getDurationMinutes());
+                ue.put("totalMarks", ex.getTotalMarks());
+                ue.put("passingMarks", ex.getPassingMarks());
+                ue.put("hasCodingRound", ex.getHasCodingRound());
+                ue.put("examDate", ex.getExamDate() != null ? ex.getExamDate().toString() : null);
+                ue.put("startTime", ex.getStartTime() != null ? ex.getStartTime().toString() : null);
+                ue.put("status", en.getStatus().name());
+                upcomingExams.add(ue);
+            }
+        }
+
+        Map<String, Object> profile = new HashMap<>();
+        profile.put("id", student.getId());
+        profile.put("name", student.getName());
+        profile.put("email", student.getEmail());
+        profile.put("studentId", student.getStudentIdNumber() != null ? student.getStudentIdNumber() : "N/A");
+        profile.put("institution", student.getClient() != null ? student.getClient().getName() : "Evaluation Portal");
+        profile.put("role", "student");
+        profile.put("joinedAt", student.getCreatedAt() != null ? student.getCreatedAt().toString() : "");
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("student", profile);
+        response.put("enrolledExamsCount", enrolledExamsCount);
+        response.put("eligibleExamsCount", eligibleExamsCount);
+        response.put("upcomingExamsCount", upcomingExamsCount);
+        response.put("examsAppearedCount", examsAppearedCount);
+        response.put("examsCompletedCount", examsCompletedCount);
+        response.put("averageScore", averageScore);
+        response.put("passCount", passCount);
+        response.put("failCount", failCount);
+        response.put("totalViolations", totalViolations);
+        response.put("recentResults", recentResults);
+        response.put("upcomingExams", upcomingExams);
+
+        return ResponseEntity.ok(response);
     }
 }
