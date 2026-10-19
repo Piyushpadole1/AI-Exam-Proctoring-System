@@ -9,15 +9,25 @@ public class ViolationResponse {
     private String message;
     private Integer totalViolations;
     private Double fairnessScore;
+    private Double integrityScore;
+    private Integer pointsDeducted;
+    private Integer warningNumber;
+    private String terminationReason;
 
     public ViolationResponse() {
     }
 
     public ViolationResponse(boolean success, Double currentScore, String classification, boolean shouldTerminate, String message) {
-        this(success, currentScore, classification, shouldTerminate, message, null, null);
+        this(success, currentScore, classification, shouldTerminate, message, null, null, currentScore, 0, null, null);
     }
 
     public ViolationResponse(boolean success, Double currentScore, String classification, boolean shouldTerminate, String message, Integer totalViolations, Double fairnessScore) {
+        this(success, currentScore, classification, shouldTerminate, message, totalViolations, fairnessScore, fairnessScore, 0, null, null);
+    }
+
+    public ViolationResponse(boolean success, Double currentScore, String classification, boolean shouldTerminate,
+                             String message, Integer totalViolations, Double fairnessScore, Double integrityScore,
+                             Integer pointsDeducted, Integer warningNumber, String terminationReason) {
         this.success = success;
         this.currentScore = currentScore;
         this.classification = classification;
@@ -25,6 +35,10 @@ public class ViolationResponse {
         this.message = message;
         this.totalViolations = totalViolations;
         this.fairnessScore = fairnessScore;
+        this.integrityScore = integrityScore;
+        this.pointsDeducted = pointsDeducted;
+        this.warningNumber = warningNumber;
+        this.terminationReason = terminationReason;
     }
 
     public Integer getTotalViolations() {
@@ -40,11 +54,47 @@ public class ViolationResponse {
     }
 
     public Double getFairnessScore() {
-        return fairnessScore;
+        return integrityScore != null ? integrityScore : fairnessScore;
     }
 
     public void setFairnessScore(Double fairnessScore) {
         this.fairnessScore = fairnessScore;
+        if (this.integrityScore == null) {
+            this.integrityScore = fairnessScore;
+        }
+    }
+
+    public Double getIntegrityScore() {
+        return integrityScore != null ? integrityScore : fairnessScore;
+    }
+
+    public void setIntegrityScore(Double integrityScore) {
+        this.integrityScore = integrityScore;
+        this.fairnessScore = integrityScore;
+    }
+
+    public Integer getPointsDeducted() {
+        return pointsDeducted;
+    }
+
+    public void setPointsDeducted(Integer pointsDeducted) {
+        this.pointsDeducted = pointsDeducted;
+    }
+
+    public Integer getWarningNumber() {
+        return warningNumber;
+    }
+
+    public void setWarningNumber(Integer warningNumber) {
+        this.warningNumber = warningNumber;
+    }
+
+    public String getTerminationReason() {
+        return terminationReason;
+    }
+
+    public void setTerminationReason(String terminationReason) {
+        this.terminationReason = terminationReason;
     }
 
     public boolean isSuccess() {

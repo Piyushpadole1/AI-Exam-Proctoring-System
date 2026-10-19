@@ -48,6 +48,9 @@ public class ExamAttempt {
     @Column(name = "device_info", columnDefinition = "TEXT")
     private String deviceInfo;
 
+    @Column(name = "termination_reason")
+    private String terminationReason;
+
     @Column(name = "saved_answers", columnDefinition = "LONGTEXT")
     private String savedAnswers;
 
@@ -191,6 +194,14 @@ public class ExamAttempt {
 
     public void setDeviceInfo(String deviceInfo) {
         this.deviceInfo = deviceInfo;
+    }
+
+    public String getTerminationReason() {
+        return terminationReason;
+    }
+
+    public void setTerminationReason(String terminationReason) {
+        this.terminationReason = terminationReason;
     }
 
     public String getSavedAnswers() {

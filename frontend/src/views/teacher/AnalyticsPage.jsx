@@ -16,14 +16,11 @@ import {
   Chip,
   Alert,
   LinearProgress,
-  Stack,
-  Divider,
 } from '@mui/material';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
-import TimelineIcon from '@mui/icons-material/Timeline';
 import PageContainer from 'src/components/container/PageContainer';
 import DashboardCard from '../../components/shared/DashboardCard';
 import { useGetAnalyticsQuery } from '../../slices/proctoringApiSlice';
@@ -60,8 +57,6 @@ const AnalyticsPage = () => {
     classificationDist = [],
     scoresByExam = [],
     violationsTimeline = [],
-    confidenceByType = [],
-    topViolators = [],
     totalAttempts = 0,
     passedCount = 0,
     failedCount = 0,
@@ -114,7 +109,7 @@ const AnalyticsPage = () => {
                       {averageScore}
                     </Typography>
                     <Typography variant="body2" color="textSecondary">
-                      Average Score (High: {highestScore})
+                      Average Score (High: {highestScore} / Low: {lowestScore})
                     </Typography>
                   </div>
                 </Box>
@@ -132,7 +127,7 @@ const AnalyticsPage = () => {
                       {passRate}%
                     </Typography>
                     <Typography variant="body2" color="textSecondary">
-                      Pass Rate ({passedCount} Passed)
+                      Pass Rate ({passedCount} Passed / {failedCount} Failed)
                     </Typography>
                   </div>
                 </Box>
@@ -307,7 +302,7 @@ const AnalyticsPage = () => {
                     <TableCell><strong>Exam Name</strong></TableCell>
                     <TableCell><strong>Exam Code</strong></TableCell>
                     <TableCell align="center"><strong>Total Sessions</strong></TableCell>
-                    <TableCell align="center"><strong>Avg Fairness Score</strong></TableCell>
+                    <TableCell align="center"><strong>Avg Integrity Score</strong></TableCell>
                     <TableCell align="center"><strong>Total Violations</strong></TableCell>
                   </TableRow>
                 </TableHead>
@@ -321,8 +316,8 @@ const AnalyticsPage = () => {
                       <TableCell align="center">{e.totalSessions}</TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={`${Math.round(e.avgFairness || 0)}/100`}
-                          color={e.avgFairness >= 70 ? 'success' : 'warning'}
+                          label={`${Math.round(e.avgIntegrity ?? e.avgFairness ?? 0)}/100`}
+                          color={(e.avgIntegrity ?? e.avgFairness ?? 0) >= 70 ? 'success' : 'warning'}
                           size="small"
                         />
                       </TableCell>

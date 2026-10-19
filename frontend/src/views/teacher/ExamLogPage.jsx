@@ -28,14 +28,11 @@ import {
   Alert,
   Card,
   CardMedia,
-  CardContent,
 } from '@mui/material';
 import {
-  Warning as WarningIcon,
   Image as ImageIcon,
   Close as CloseIcon,
   Stream as StreamIcon,
-  People as PeopleIcon,
   Security as SecurityIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
@@ -65,6 +62,9 @@ const getEventTypeChip = (eventType) => {
   if (t.includes('FACE') || t.includes('LOOKING')) {
     return <Chip label={eventType} color="warning" size="small" variant="filled" />;
   }
+  if (t.includes('VOICE') || t.includes('AUDIO') || t.includes('SPEECH') || t.includes('NOISE')) {
+    return <Chip label={eventType} color="info" size="small" variant="filled" />;
+  }
   if (t.includes('TAB') || t.includes('BLUR') || t.includes('FULLSCREEN')) {
     return <Chip label={eventType} color="secondary" size="small" variant="filled" />;
   }
@@ -85,7 +85,7 @@ const ExamLogPage = () => {
   const [selectedExamId, setSelectedExamId] = useState('all');
   const [previewEvidence, setPreviewEvidence] = useState(null);
 
-  const { data: examsData, isLoading: examsLoading } = useGetExamsQuery();
+  const { data: examsData } = useGetExamsQuery();
 
   const {
     data: logsData,
@@ -193,6 +193,7 @@ const ExamLogPage = () => {
                     <TableCell><strong>Severity</strong></TableCell>
                     <TableCell><strong>Description</strong></TableCell>
                     <TableCell align="center"><strong>Penalty</strong></TableCell>
+                    <TableCell align="center"><strong>Score After</strong></TableCell>
                     <TableCell align="center"><strong>Evidence</strong></TableCell>
                   </TableRow>
                 </TableHead>
@@ -233,6 +234,21 @@ const ExamLogPage = () => {
                         ) : (
                           <Chip label="0" size="small" variant="outlined" />
                         )}
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={`${log.integrityScoreAfter !== undefined ? log.integrityScoreAfter : 100}/100`}
+                          size="small"
+                          color={
+                            (log.integrityScoreAfter ?? 100) >= 70
+                              ? 'success'
+                              : (log.integrityScoreAfter ?? 100) >= 30
+                              ? 'warning'
+                              : 'error'
+                          }
+                          variant="outlined"
+                          sx={{ fontWeight: 'bold' }}
+                        />
                       </TableCell>
                       <TableCell align="center">
                         {log.evidenceUrl ? (

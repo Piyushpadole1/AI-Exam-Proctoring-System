@@ -339,10 +339,15 @@ public class ExamAttemptService {
 
         // Update ProctoringSession
         Optional<ProctoringSession> sessionOpt = sessionRepository.findByAttemptId(attempt.getId());
-        sessionOpt.ifPresent(session -> {
+        if (sessionOpt.isPresent()) {
+            ProctoringSession session = sessionOpt.get();
             session.setEndedAt(LocalDateTime.now());
             sessionRepository.save(session);
-        });
+            if (session.getIntegrityScore() != null) {
+                attempt.setIntegrityScore(session.getIntegrityScore());
+            }
+        }
+        attempt = attemptRepository.save(attempt);
 
         // Mark student enrollment as COMPLETED so it updates the status permanently in the database
         if (attempt.getExam() != null && attempt.getStudent() != null) {

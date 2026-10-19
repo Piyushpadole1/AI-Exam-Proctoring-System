@@ -46,6 +46,7 @@ public class LegacyExamSessionController {
     private final ExamEnrollmentRepository enrollmentRepository;
     private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     private final com.aieval8.examproctoring.service.CodeExecutionService codeExecutionService;
+    private final com.aieval8.examproctoring.service.NotificationService notificationService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public LegacyExamSessionController(ExamService examService,
@@ -61,7 +62,8 @@ public class LegacyExamSessionController {
                                         UserRepository userRepository,
                                         ExamEnrollmentRepository enrollmentRepository,
                                         org.springframework.security.crypto.password.PasswordEncoder passwordEncoder,
-                                        com.aieval8.examproctoring.service.CodeExecutionService codeExecutionService) {
+                                        com.aieval8.examproctoring.service.CodeExecutionService codeExecutionService,
+                                        com.aieval8.examproctoring.service.NotificationService notificationService) {
         this.examService = examService;
         this.attemptService = attemptService;
         this.enrollmentService = enrollmentService;
@@ -76,6 +78,7 @@ public class LegacyExamSessionController {
         this.enrollmentRepository = enrollmentRepository;
         this.passwordEncoder = passwordEncoder;
         this.codeExecutionService = codeExecutionService;
+        this.notificationService = notificationService;
     }
 
     private CustomUserDetails resolveUser(CustomUserDetails principal) {
@@ -260,12 +263,15 @@ public class LegacyExamSessionController {
         return ResponseEntity.ok(map);
     }
 
-    @PostMapping("/api/users/exam")
+    @PostMapping({"/api/users/exam", "/api/users/exam/create"})
     public ResponseEntity<Map<String, Object>> createLegacyExam(@RequestBody Map<String, Object> body,
                                                                  @AuthenticationPrincipal CustomUserDetails teacherDetails) {
         CreateExamRequest req = new CreateExamRequest();
         req.setExamName((String) body.getOrDefault("examName", "New Exam"));
         String code = (String) body.get("examId");
+        if (code == null || code.trim().isEmpty()) {
+            code = (String) body.get("examCode");
+        }
         if (code == null || code.trim().isEmpty()) {
             code = "EXAM_" + (System.currentTimeMillis() % 100000);
         }
@@ -1238,9 +1244,18 @@ public class LegacyExamSessionController {
         item.put("createdAt", a.getCreatedAt() != null ? a.getCreatedAt().toString() : LocalDateTime.now().toString());
         item.put("submittedAt", a.getSubmittedAt() != null ? a.getSubmittedAt().toString() : "");
 
+        double integrity = a.getIntegrityScore() != null ? a.getIntegrityScore() : 100.0;
         Optional<ProctoringSession> sessionOpt = sessionRepository.findByAttemptId(a.getId());
-        sessionOpt.ifPresent(ps -> item.put("sessionId", ps.getId().toString()));
+        if (sessionOpt.isPresent()) {
+            ProctoringSession ps = sessionOpt.get();
+            item.put("sessionId", ps.getId().toString());
+            if (ps.getIntegrityScore() != null) {
+                integrity = ps.getIntegrityScore();
+            }
+        }
 
+        item.put("integrityScore", Math.round(integrity * 10.0) / 10.0);
+        item.put("fairnessScore", Math.round(integrity * 10.0) / 10.0);
         item.put("codingSubmissions", Collections.emptyList());
 
         return item;
@@ -1470,6 +1485,13 @@ public class LegacyExamSessionController {
         summaryMap.put("totalViolations", violationList.size());
         resp.put("summary", summaryMap);
 
+        double detailedIntegrity = a.getIntegrityScore() != null ? a.getIntegrityScore() : 100.0;
+        if (sOpt.isPresent() && sOpt.get().getIntegrityScore() != null) {
+            detailedIntegrity = sOpt.get().getIntegrityScore();
+        }
+        resp.put("integrityScore", Math.round(detailedIntegrity * 10.0) / 10.0);
+        resp.put("fairnessScore", Math.round(detailedIntegrity * 10.0) / 10.0);
+
         resp.put("questions", questionReports);
         resp.put("violations", violationList);
 
@@ -1547,6 +1569,7 @@ public class LegacyExamSessionController {
                 map.put("cellPhoneCount", cellPhone);
                 map.put("prohibitedObjectCount", prohibited);
                 map.put("fairnessScore", Math.round(fairness));
+                map.put("integrityScore", Math.round(fairness));
                 map.put("totalViolations", noFace + multiFace + cellPhone + prohibited);
                 map.put("status", att.getStatus().toString());
                 map.put("screenshots", screenshots);
@@ -1583,7 +1606,9 @@ public class LegacyExamSessionController {
                 map.put("cellPhoneCount", cp);
                 map.put("prohibitedObjectCount", pr);
                 int totalV = nf + mf + cp + pr;
-                map.put("fairnessScore", Math.max(0, Math.round(((6.0 - Math.min(6, totalV)) / 6.0) * 100.0)));
+                double fs = e.getFairnessScore() != null ? e.getFairnessScore() : 100.0;
+                map.put("fairnessScore", Math.round(fs));
+                map.put("integrityScore", Math.round(fs));
                 map.put("totalViolations", totalV);
                 try {
                     map.put("screenshots", objectMapper.readValue(e.getScreenshotsJson(), List.class));
@@ -1602,7 +1627,9 @@ public class LegacyExamSessionController {
                 map.put("cellPhoneCount", cellPhone);
                 map.put("prohibitedObjectCount", prohibited);
                 map.put("totalViolations", totalVMerged);
-                map.put("fairnessScore", Math.max(0, Math.round(((6.0 - Math.min(6, totalVMerged)) / 6.0) * 100.0)));
+                double mergedFs = e.getFairnessScore() != null ? e.getFairnessScore() : 100.0;
+                map.put("fairnessScore", Math.round(mergedFs));
+                map.put("integrityScore", Math.round(mergedFs));
                 try {
                     List<Map<String, Object>> existing = new ArrayList<>((List<Map<String, Object>>) map.get("screenshots"));
                     List<Map<String, Object>> fromEntry = objectMapper.readValue(e.getScreenshotsJson(), List.class);
@@ -1705,6 +1732,11 @@ public class LegacyExamSessionController {
         map.put("attemptId", res.getAttemptId().toString());
         map.put("timeLeftSeconds", res.getTimeLeftSeconds());
         map.put("resumed", false);
+        double startIntegrity = sessionRepository.findByAttemptId(res.getAttemptId())
+                .map(ps -> ps.getIntegrityScore() != null ? ps.getIntegrityScore() : 100.0)
+                .orElse(100.0);
+        map.put("integrityScore", startIntegrity);
+        map.put("fairnessScore", startIntegrity);
         return ResponseEntity.ok(map);
     }
 
@@ -2016,6 +2048,20 @@ public class LegacyExamSessionController {
         }
         enrollmentRepository.save(enrollment);
 
+        if (exam.getTeacher() != null) {
+            try {
+                notificationService.createNotification(
+                        exam.getTeacher(),
+                        "ENROLLMENT_REQUEST",
+                        "New Enrollment Request",
+                        "Student " + student.getName() + " requested enrollment for exam " + (exam.getExamName() != null ? exam.getExamName() : exam.getExamCode()),
+                        exam.getExamCode(),
+                        enrollment.getId(),
+                        "/user-approvals?tab=pending&examCode=" + exam.getExamCode() + "&requestId=" + enrollment.getId()
+                );
+            } catch (Exception ignored) {}
+        }
+
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Enrollment request submitted successfully. Waiting for teacher approval.",
@@ -2087,7 +2133,7 @@ public class LegacyExamSessionController {
         return ResponseEntity.ok(result);
     }
 
-    @PostMapping({"/api/users/exam/{examCode}/approve-student/{studentId}", "/api/users/exam/{examCode}/enrollment/{studentId}/approve"})
+    @PostMapping({"/api/users/exam/{examCode}/approve-student/{studentId}", "/api/users/exam/{examCode}/enrollment/{studentId}/approve", "/api/users/exam/{examCode}/approve-enrollment/{studentId}"})
     public ResponseEntity<Map<String, Object>> approveStudent(
             @PathVariable String examCode,
             @PathVariable Long studentId,
@@ -2127,6 +2173,18 @@ public class LegacyExamSessionController {
         }
         enrollmentRepository.save(en);
 
+        try {
+            notificationService.createNotification(
+                    student,
+                    "ENROLLMENT_APPROVED",
+                    "Enrollment Approved",
+                    "Your enrollment request for exam " + (exam.getExamName() != null ? exam.getExamName() : exam.getExamCode()) + " has been approved.",
+                    exam.getExamCode(),
+                    en.getId(),
+                    "/exam/" + exam.getExamCode()
+            );
+        } catch (Exception ignored) {}
+
         return ResponseEntity.ok(Map.of("success", true, "message", "Student approved successfully."));
     }
 
@@ -2153,10 +2211,25 @@ public class LegacyExamSessionController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You do not own this exam."));
         }
 
+        User student = userRepository.findById(studentId).orElse(null);
         ExamEnrollment en = enrollmentRepository.findByExamIdAndStudentId(exam.getId(), studentId).orElse(null);
         if (en != null) {
             en.setStatus(EnrollmentStatus.REJECTED);
             enrollmentRepository.save(en);
+
+            if (student != null) {
+                try {
+                    notificationService.createNotification(
+                            student,
+                            "ENROLLMENT_REJECTED",
+                            "Enrollment Rejected",
+                            "Your enrollment request for exam " + (exam.getExamName() != null ? exam.getExamName() : exam.getExamCode()) + " was rejected.",
+                            exam.getExamCode(),
+                            en.getId(),
+                            "/exam"
+                    );
+                } catch (Exception ignored) {}
+            }
         }
 
         return ResponseEntity.ok(Map.of("success", true, "message", "Student request rejected."));

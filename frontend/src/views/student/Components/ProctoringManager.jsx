@@ -1,29 +1,37 @@
 /**
- * ProctoringManager — Orchestrates all proctoring monitors:
- *   - WebCam (COCO-SSD face/object detection) — existing component
- *   - BrowserMonitor (tab switch, fullscreen, copy/paste)
- *   - AudioMonitor (background noise, speech)
- *
- * Sends structured violation events to the backend API.
- * Checks for auto-termination.
+ * ProctoringManager — 100-Point Integrity Proctoring System Orchestrator:
+ *   - Live 100-point integrity score display
+ *   - Head/Eye gaze warning tracker (first 10 free, 11th+ -5 pts)
+ *   - Fullscreen lock enforcement (1st strike = warning modal, 2nd = termination)
+ *   - Web Audio API alarm siren on violation
+ *   - Sustained detection & cooldown handling
+ *   - Backend validation & synchronization
  */
 import React, { useCallback, useRef, useState, useEffect } from 'react';
-import { Box, Chip, Stack, Typography, Alert } from '@mui/material';
+import {
+  Box,
+  Chip,
+  Stack,
+  Typography,
+  Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+} from '@mui/material';
 import {
   Shield as ShieldIcon,
-  Warning as WarningIcon,
-  Error as ErrorIcon,
-  CheckCircle as SafeIcon,
+  Fullscreen as FullscreenIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import BrowserMonitor from './BrowserMonitor';
 import AudioMonitor from './AudioMonitor';
 import WebCam from './WebCam';
 import axiosInstance from '../../../axios';
 import PROCTORING_CONFIG from '../../../config/proctoring';
-import { UploadClient } from '@uploadcare/upload-client';
+import { playSiren } from '../../../utils/siren';
 import { toast } from 'react-toastify';
-
-const uploadClient = new UploadClient({ publicKey: 'e69ab6e5db6d4a41760b' });
 
 export default function ProctoringManager({
   sessionId,
@@ -34,11 +42,13 @@ export default function ProctoringManager({
   cheatingLog,
   updateCheatingLog,
 }) {
-  const [currentScore, setCurrentScore] = useState(0);
-  const [classification, setClassification] = useState('SAFE');
+  const [integrityScore, setIntegrityScore] = useState(100);
+  const [headGazeCount, setHeadGazeCount] = useState(0);
+  const [fullscreenExits, setFullscreenExits] = useState(0);
   const [totalViolations, setTotalViolations] = useState(0);
+  const [classification, setClassification] = useState('SAFE');
   const [isTerminated, setIsTerminated] = useState(false);
-  const evidenceCooldown = useRef({});
+  const [fullscreenPromptOpen, setFullscreenPromptOpen] = useState(false);
 
   const sessionIdRef = useRef(sessionId);
   useEffect(() => {
@@ -50,197 +60,375 @@ export default function ProctoringManager({
     isActiveRef.current = isActive;
   }, [isActive]);
 
-  // ── Handle any violation from any monitor ─────────────────────────
+  const isTerminatedRef = useRef(isTerminated);
+  useEffect(() => {
+    isTerminatedRef.current = isTerminated;
+  }, [isTerminated]);
+
+  const integrityScoreRef = useRef(100);
+  const headGazeCountRef = useRef(0);
+  const fullscreenExitsRef = useRef(0);
+  const totalViolationsRef = useRef(0);
+  const onTerminateRef = useRef(onTerminate);
+  useEffect(() => {
+    onTerminateRef.current = onTerminate;
+  }, [onTerminate]);
+
+  // ── Restore live score and violations from backend on mount or page refresh ──
+  useEffect(() => {
+    if (!sessionId) return;
+    let isSubscribed = true;
+
+    const restoreSessionStatus = async () => {
+      try {
+        const res = await axiosInstance.get(`/api/proctoring/sessions/${sessionId}/status`, {
+          withCredentials: true,
+        });
+        if (!isSubscribed || !res?.data) return;
+
+        const data = res.data;
+        const restoredScore =
+          data.integrityScore !== undefined
+            ? Number(data.integrityScore)
+            : data.fairnessScore !== undefined
+            ? Number(data.fairnessScore)
+            : 100;
+
+        integrityScoreRef.current = restoredScore;
+        setIntegrityScore(restoredScore);
+
+        if (data.headGazeCount !== undefined) {
+          headGazeCountRef.current = Number(data.headGazeCount);
+          setHeadGazeCount(Number(data.headGazeCount));
+        }
+
+        if (data.fullscreenExits !== undefined) {
+          fullscreenExitsRef.current = Number(data.fullscreenExits);
+          setFullscreenExits(Number(data.fullscreenExits));
+        }
+
+        if (data.totalViolations !== undefined) {
+          totalViolationsRef.current = Number(data.totalViolations);
+          setTotalViolations(Number(data.totalViolations));
+        }
+
+        if (data.classification) {
+          setClassification(data.classification);
+        }
+
+        if (data.isTerminated || data.shouldTerminate) {
+          setIsTerminated(true);
+          isTerminatedRef.current = true;
+          const reason = data.terminationReason || 'Integrity score reached 0';
+          if (onTerminateRef.current) {
+            onTerminateRef.current(reason);
+          }
+        }
+      } catch (err) {
+        console.warn('[ProctoringManager] Could not restore session status on mount:', err.message);
+      }
+    };
+
+    restoreSessionStatus();
+    return () => {
+      isSubscribed = false;
+    };
+  }, [sessionId]);
+
+  // Handle Fullscreen Exit Modal Prompt
+  const handleFullscreenWarning = useCallback((strike) => {
+    if (strike === 1) {
+      setFullscreenPromptOpen(true);
+    }
+  }, []);
+
+  const handleReEnterFullscreen = async () => {
+    try {
+      const el = document.documentElement;
+      if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else if (el.webkitRequestFullscreen) {
+        await el.webkitRequestFullscreen();
+      }
+    } catch (err) {
+      console.warn('[ProctoringManager] Fullscreen request error:', err);
+    }
+    setFullscreenPromptOpen(false);
+  };
+
+  // ── Handle Violations from WebCam, BrowserMonitor, AudioMonitor ──
   const handleViolation = useCallback(
     async (violation) => {
       const activeSessionId = sessionIdRef.current || sessionId;
-      if (!activeSessionId || !isActiveRef.current || isTerminated) return;
+      if (!activeSessionId || !isActiveRef.current || isTerminatedRef.current) return;
 
-      const payload = {
+      // 1. Play Siren Alert immediately (< 10ms)
+      playSiren();
+
+      const eventType = violation.eventType;
+      const isHeadGaze =
+        eventType.includes('HEAD') || eventType.includes('GAZE');
+      const isFullscreen =
+        eventType.includes('FULLSCREEN') ||
+        eventType.includes('TAB_SWITCH') ||
+        eventType.includes('WINDOW_BLUR');
+
+      // 2. Update local counters using refs to avoid stale closures
+      let nextHeadGaze = headGazeCountRef.current;
+      if (isHeadGaze) {
+        nextHeadGaze += 1;
+        headGazeCountRef.current = nextHeadGaze;
+        setHeadGazeCount(nextHeadGaze);
+      }
+
+      let nextFullscreen = fullscreenExitsRef.current;
+      if (isFullscreen) {
+        nextFullscreen += 1;
+        fullscreenExitsRef.current = nextFullscreen;
+        setFullscreenExits(nextFullscreen);
+      }
+
+      // 3. Calculate client-side tentative deduction for instant HUD update
+      let localDeduction = 0;
+      if (eventType.includes('CELL') || eventType.includes('PHONE') || eventType.includes('LAPTOP')) {
+        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.MOBILE_PHONE; // 50
+      } else if (eventType.includes('MULTIPLE')) {
+        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.MULTIPLE_FACES; // 30
+      } else if (eventType.includes('NO_FACE') || eventType.includes('NOT_VISIBLE')) {
+        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.NO_PERSON; // 20
+      } else if (isHeadGaze) {
+        if (nextHeadGaze > PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_FREE_WARNINGS) {
+          localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_PENALTY_POINTS; // 5
+        }
+      }
+
+      const currentScore = integrityScoreRef.current;
+      const tentativeScore = Math.max(0, currentScore - localDeduction);
+      integrityScoreRef.current = tentativeScore;
+      setIntegrityScore(tentativeScore);
+
+      totalViolationsRef.current += 1;
+      setTotalViolations(totalViolationsRef.current);
+
+      // 4. Display Warning Message with detailed count/deduction
+      let displayMsg = '';
+      if (isHeadGaze) {
+        if (nextHeadGaze <= 10) {
+          displayMsg = `⚠️ Warning ${nextHeadGaze} of 10: Head movement / eye gaze looking away`;
+        } else {
+          displayMsg = `⚠️ Warning ${nextHeadGaze}: Head/eye movement detected (5 points deducted)`;
+        }
+      } else if (isFullscreen) {
+        if (nextFullscreen === 1) {
+          displayMsg = '⚠️ Fullscreen Exit Warning (1 of 2): Return to fullscreen immediately!';
+        } else {
+          displayMsg = '🚨 Exam Disqualified: Fullscreen exit limit exceeded (2/2)!';
+        }
+      } else if (localDeduction > 0) {
+        displayMsg = `⚠️ ${violation.description || eventType.replace(/_/g, ' ')} (-${localDeduction} points deducted)`;
+      } else {
+        displayMsg = `⚠️ Warning: ${violation.description || eventType.replace(/_/g, ' ')}`;
+      }
+
+      toast.warn(displayMsg);
+
+      // Generate client-side UUID for idempotency
+      const violationId =
+        (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : 'v_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+
+      // 5. Send lightweight violation event first (< 20ms) without heavy screenshot
+      const lightweightPayload = {
+        violationId,
         sessionId: activeSessionId,
         eventType: violation.eventType,
         confidence: violation.confidence || 1.0,
-        description: violation.description || '',
-        evidenceUrl: violation.evidenceUrl || violation.screenshot || null,
-        metadata: violation.metadata || {},
+        description: violation.description || displayMsg,
+        evidenceUrl: null,
+        metadata: {
+          ...violation.metadata,
+          warningNumber: isHeadGaze ? nextHeadGaze : null,
+          fullscreenStrike: isFullscreen ? nextFullscreen : null,
+        },
       };
 
-      // Retry up to 2 times on transient failures
-      let response = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          response = await axiosInstance.post('/api/proctoring/events', payload, {
-            withCredentials: true,
-          });
-          if (response?.data) break;
-        } catch (err) {
-          if (attempt === 2) {
-            console.error('[ProctoringManager] Failed to log violation after retries:', err.message);
-            return;
+      // 6. Decoupled evidence upload: if screenshot exists, send asynchronously
+      const rawScreenshot = violation.evidenceUrl || violation.screenshot;
+      if (rawScreenshot) {
+        setTimeout(async () => {
+          try {
+            await axiosInstance.post(
+              '/api/proctoring/evidence',
+              {
+                violationId,
+                sessionId: activeSessionId,
+                evidenceUrl: rawScreenshot,
+              },
+              { withCredentials: true }
+            );
+          } catch (evidenceErr) {
+            console.warn('[ProctoringManager] Asynchronous evidence upload note:', evidenceErr.message);
           }
-          await new Promise((resolve) => setTimeout(resolve, 800));
-        }
+        }, 50);
       }
-
-      if (!response?.data) return;
-      const data = response.data;
-
-      if (data.success) {
-        const newViolationsCount = data.runningPoints !== undefined ? data.runningPoints : totalViolations + 1;
-        setTotalViolations(newViolationsCount);
-        setCurrentScore(data.currentScore !== undefined ? data.currentScore : Math.max(0, 100 - newViolationsCount * 16));
-        setClassification(data.classification || (newViolationsCount >= 6 ? 'MALPRACTICE' : newViolationsCount >= 3 ? 'WARNING' : 'SAFE'));
-
-        const desc = violation.description || violation.eventType.replace(/_/g, ' ');
-        toast.warning(`⚠️ Warning: ${desc} (${newViolationsCount}/6 violations recorded)`);
-
-        // Update legacy cheating log context for backward compatibility
-        const typeMap = {
-          NO_FACE_DETECTED: 'noFaceCount',
-          MULTIPLE_FACES: 'multipleFaceCount',
-          CELL_PHONE_DETECTED: 'cellPhoneCount',
-          BOOK_DETECTED: 'prohibitedObjectCount',
-          LAPTOP_DETECTED: 'prohibitedObjectCount',
-          PROHIBITED_OBJECT: 'prohibitedObjectCount',
-        };
-        const logKey = typeMap[violation.eventType];
-        if (logKey && updateCheatingLog) {
-          updateCheatingLog({
-            ...cheatingLog,
-            [logKey]: (cheatingLog[logKey] || 0) + 1,
-            examId,
-          });
-        }
-
-        // Capture evidence for high-severity events if no screenshot was attached
-        if (
-          !payload.evidenceUrl &&
-          ['MULTIPLE_FACES', 'CELL_PHONE_DETECTED', 'NO_FACE_DETECTED', 'HEAD_TURNED', 'EYE_GAZE_AWAY'].includes(
-            violation.eventType,
-          )
-        ) {
-          captureEvidence(violation.eventType);
-        }
-
-        // Immediate Auto-Termination at 6 violations
-        if (newViolationsCount >= 6 || data.shouldTerminate) {
-          setIsTerminated(true);
-          if (onTerminate) {
-            onTerminate('Exam terminated: Malpractice threshold exceeded (6 violations reached).');
-          }
-        }
-      }
-    },
-    [sessionId, isActive, isTerminated, onTerminate, cheatingLog, updateCheatingLog, examId, totalViolations],
-  );
-
-  // ── Evidence Capture ──────────────────────────────────────────────
-  const captureEvidence = useCallback(
-    async (eventType) => {
-      const now = Date.now();
-      const lastCapture = evidenceCooldown.current[eventType] || 0;
-      if (now - lastCapture < PROCTORING_CONFIG.EVIDENCE_COOLDOWN) return;
-      evidenceCooldown.current[eventType] = now;
-
-      const video = webcamRef?.current?.video;
-      if (!video || video.readyState !== 4 || video.videoWidth === 0) return;
 
       try {
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext('2d').drawImage(video, 0, 0);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        const response = await axiosInstance.post('/api/proctoring/events', lightweightPayload, {
+          withCredentials: true,
+        });
 
-        let finalUrl = dataUrl;
-        try {
-          // Attempt Uploadcare upload
-          const arr = dataUrl.split(',');
-          const mime = arr[0].match(/:(.*?);/)[1];
-          const bstr = atob(arr[1]);
-          let n = bstr.length;
-          const u8arr = new Uint8Array(n);
-          while (n--) u8arr[n] = bstr.charCodeAt(n);
-          const file = new File([u8arr], `evidence_${eventType}_${Date.now()}.jpg`, { type: mime });
+        if (response?.data) {
+          const data = response.data;
+          const backendScore =
+            data.integrityScore !== undefined
+              ? Number(data.integrityScore)
+              : data.fairnessScore !== undefined
+              ? Number(data.fairnessScore)
+              : tentativeScore;
 
-          const result = await uploadClient.uploadFile(file);
-          if (result?.cdnUrl) {
-            finalUrl = result.cdnUrl;
+          integrityScoreRef.current = backendScore;
+          setIntegrityScore(backendScore);
+          setClassification(
+            data.classification ||
+              (backendScore >= 70 ? 'SAFE' : backendScore >= 30 ? 'WARNING' : 'MALPRACTICE')
+          );
+
+          if (data.totalViolations !== undefined) {
+            totalViolationsRef.current = Number(data.totalViolations);
+            setTotalViolations(totalViolationsRef.current);
           }
-        } catch (uploadErr) {
-          // Fall back gracefully to dataUrl
-          finalUrl = dataUrl;
-        }
 
-        // Log evidence to backend
-        await axiosInstance.post(
-          '/api/proctoring/evidence',
-          {
-            sessionId,
-            eventType,
-            evidenceUrl: finalUrl,
-            examId,
-            confidence: 1.0,
-          },
-          { withCredentials: true },
-        );
+          // Termination check: score <= 0 or 2nd fullscreen exit
+          const isTerm =
+            data.shouldTerminate ||
+            backendScore <= 0 ||
+            (isFullscreen && nextFullscreen >= 2) ||
+            violation.forceTerminate;
+
+          if (isTerm && !isTerminatedRef.current) {
+            setIsTerminated(true);
+            isTerminatedRef.current = true;
+            const termReason =
+              violation.terminationReason ||
+              data.terminationReason ||
+              (backendScore <= 0 ? 'Integrity score reached 0' : 'Left fullscreen twice');
+
+            toast.error(`Exam Terminated: ${termReason}`);
+            if (onTerminateRef.current) {
+              onTerminateRef.current(termReason);
+            }
+          }
+        }
       } catch (err) {
-        console.warn('[ProctoringManager] Evidence capture warning:', err.message);
+        console.warn('[ProctoringManager] Backend event sync note:', err.message);
+        // Fallback local termination
+        if ((tentativeScore <= 0 || (isFullscreen && nextFullscreen >= 2)) && !isTerminatedRef.current) {
+          setIsTerminated(true);
+          isTerminatedRef.current = true;
+          const termReason = tentativeScore <= 0 ? 'Integrity score reached 0' : 'Left fullscreen twice';
+          if (onTerminateRef.current) onTerminateRef.current(termReason);
+        }
       }
     },
-    [sessionId, webcamRef, examId],
+    [sessionId]
   );
 
-  // Status color/icon
-  const getStatusColor = () => {
-    if (classification === 'SAFE') return 'success';
-    if (classification === 'WARNING') return 'warning';
+  const getScoreColor = () => {
+    if (integrityScore >= 70) return 'success';
+    if (integrityScore >= 30) return 'warning';
     return 'error';
-  };
-
-  const getStatusIcon = () => {
-    if (classification === 'SAFE') return <SafeIcon fontSize="small" />;
-    if (classification === 'WARNING') return <WarningIcon fontSize="small" />;
-    return <ErrorIcon fontSize="small" />;
   };
 
   return (
     <Box sx={{ width: '100%', height: '100%' }}>
-      {/* WebCam & Invisible monitors */}
+      {/* Visual WebCam HUD and Head/Gaze Tracker */}
       <WebCam webcamRef={webcamRef} onViolation={handleViolation} />
-      <BrowserMonitor onViolation={handleViolation} isActive={isActive && !isTerminated} />
+
+      {/* Invisible Monitors */}
+      <BrowserMonitor
+        onViolation={handleViolation}
+        isActive={isActive && !isTerminated}
+        onFullscreenWarning={handleFullscreenWarning}
+      />
       <AudioMonitor onViolation={handleViolation} isActive={isActive && !isTerminated} />
 
-      {/* Status display */}
+      {/* Live Integrity Score & Violations HUD */}
       <Box sx={{ p: 1 }}>
         <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
           <Chip
             icon={<ShieldIcon />}
-            label={`Fairness: ${Math.max(0, 100 - currentScore)}`}
-            color={getStatusColor()}
+            label={`Integrity: ${integrityScore}/100`}
+            color={getScoreColor()}
+            size="small"
+            sx={{ fontWeight: 'bold' }}
+          />
+          <Chip
+            icon={<VisibilityIcon />}
+            label={`Head/Eye: ${headGazeCount}/10 warnings`}
+            color={headGazeCount > 10 ? 'error' : headGazeCount > 5 ? 'warning' : 'default'}
             size="small"
           />
           <Chip
-            icon={getStatusIcon()}
-            label={classification}
-            color={getStatusColor()}
+            icon={<FullscreenIcon />}
+            label={`Fullscreen Exits: ${fullscreenExits}/2`}
+            color={fullscreenExits >= 2 ? 'error' : fullscreenExits === 1 ? 'warning' : 'default'}
+            size="small"
+          />
+          {totalViolations > 0 && (
+            <Chip
+              label={`Violations: ${totalViolations}`}
+              color="error"
+              size="small"
+              variant="outlined"
+            />
+          )}
+          <Chip
+            label={`Status: ${classification}`}
+            color={getScoreColor()}
             size="small"
             variant="outlined"
-          />
-          <Chip
-            label={`Violations: ${totalViolations}`}
-            color={totalViolations > 5 ? 'error' : totalViolations > 0 ? 'warning' : 'default'}
-            size="small"
           />
         </Stack>
 
         {isTerminated && (
           <Alert severity="error" sx={{ mt: 1 }}>
-            <strong>Exam Terminated</strong> — Your exam has been automatically ended due to
-            excessive violations.
+            <strong>Exam Disqualified</strong> — Your exam has been automatically ended due to integrity rules violation.
           </Alert>
         )}
       </Box>
+
+      {/* First Fullscreen Exit Warning Prompt Dialog */}
+      <Dialog
+        open={fullscreenPromptOpen && !isTerminated}
+        disableEscapeKeyDown
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ color: '#d97706', fontWeight: 'bold' }}>
+          ⚠️ Fullscreen Exit Warning (1 of 2)
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body1" mb={2}>
+            You have left fullscreen mode or switched windows.
+          </Typography>
+          <Typography variant="body2" color="textSecondary" mb={2}>
+            You must remain in fullscreen mode for the entire duration of the examination. 
+            <b> A second exit will result in immediate disqualification and auto-submission of your exam.</b>
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button
+            variant="contained"
+            color="primary"
+            fullWidth
+            onClick={handleReEnterFullscreen}
+            sx={{ py: 1.2, fontWeight: 'bold' }}
+          >
+            Re-enter Fullscreen & Continue Exam
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

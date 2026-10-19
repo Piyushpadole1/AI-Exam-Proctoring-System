@@ -1,5 +1,6 @@
 package com.aieval8.examproctoring.service;
 
+import com.aieval8.examproctoring.config.ProctoringConstants;
 import com.aieval8.examproctoring.entity.ProctoringEvent;
 import com.aieval8.examproctoring.entity.ViolationSeverity;
 import org.springframework.stereotype.Service;
@@ -9,114 +10,101 @@ import java.util.*;
 @Service
 public class ScoringEngineService {
 
-    private static final Map<String, Integer> PENALTIES = Map.ofEntries(
-            Map.entry("TAB_SWITCH", 10),
-            Map.entry("WINDOW_BLUR", 5),
-            Map.entry("FULLSCREEN_EXIT", 100),
-            Map.entry("NO_FACE_DETECTED", 10),
-            Map.entry("MULTIPLE_FACES", 25),
-            Map.entry("CELL_PHONE_DETECTED", 25),
-            Map.entry("BOOK_DETECTED", 15),
-            Map.entry("LAPTOP_DETECTED", 15),
-            Map.entry("PROHIBITED_OBJECT", 15),
-            Map.entry("GAZE_DEVIATION", 10),
-            Map.entry("BACKGROUND_NOISE", 5),
-            Map.entry("SPEECH_DETECTED", 10),
-            Map.entry("COPY_PASTE", 10),
-            Map.entry("RIGHT_CLICK", 5),
-            Map.entry("KEYBOARD_SHORTCUT", 10)
-    );
-
     private static final Map<String, ViolationSeverity> SEVERITIES = Map.ofEntries(
-            Map.entry("TAB_SWITCH", ViolationSeverity.MEDIUM),
-            Map.entry("WINDOW_BLUR", ViolationSeverity.LOW),
-            Map.entry("FULLSCREEN_EXIT", ViolationSeverity.HIGH),
-            Map.entry("NO_FACE_DETECTED", ViolationSeverity.MEDIUM),
-            Map.entry("MULTIPLE_FACES", ViolationSeverity.HIGH),
-            Map.entry("CELL_PHONE_DETECTED", ViolationSeverity.HIGH),
-            Map.entry("BOOK_DETECTED", ViolationSeverity.MEDIUM),
-            Map.entry("LAPTOP_DETECTED", ViolationSeverity.MEDIUM),
-            Map.entry("PROHIBITED_OBJECT", ViolationSeverity.MEDIUM),
-            Map.entry("GAZE_DEVIATION", ViolationSeverity.LOW),
+            Map.entry("TAB_SWITCH", ViolationSeverity.HIGH),
+            Map.entry("WINDOW_BLUR", ViolationSeverity.MEDIUM),
+            Map.entry("FULLSCREEN_EXIT", ViolationSeverity.CRITICAL),
+            Map.entry("NO_FACE_DETECTED", ViolationSeverity.HIGH),
+            Map.entry("NO_FACE", ViolationSeverity.HIGH),
+            Map.entry("MULTIPLE_FACES", ViolationSeverity.CRITICAL),
+            Map.entry("CELL_PHONE_DETECTED", ViolationSeverity.CRITICAL),
+            Map.entry("CELL_PHONE", ViolationSeverity.CRITICAL),
+            Map.entry("LAPTOP_DETECTED", ViolationSeverity.CRITICAL),
+            Map.entry("LAPTOP", ViolationSeverity.CRITICAL),
+            Map.entry("BOOK_DETECTED", ViolationSeverity.HIGH),
+            Map.entry("PROHIBITED_OBJECT", ViolationSeverity.HIGH),
+            Map.entry("HEAD_TURNED", ViolationSeverity.MEDIUM),
+            Map.entry("HEAD_MOVEMENT", ViolationSeverity.MEDIUM),
+            Map.entry("EYE_GAZE_AWAY", ViolationSeverity.MEDIUM),
+            Map.entry("EYE_GAZE", ViolationSeverity.MEDIUM),
+            Map.entry("GAZE_DEVIATION", ViolationSeverity.MEDIUM),
+            Map.entry("EXTERNAL_VOICE", ViolationSeverity.LOW),
+            Map.entry("VOICE_DETECTED", ViolationSeverity.LOW),
             Map.entry("BACKGROUND_NOISE", ViolationSeverity.LOW),
-            Map.entry("SPEECH_DETECTED", ViolationSeverity.MEDIUM),
+            Map.entry("AUDIO_NOISE", ViolationSeverity.LOW),
+            Map.entry("SPEECH_DETECTED", ViolationSeverity.LOW),
             Map.entry("COPY_PASTE", ViolationSeverity.MEDIUM),
+            Map.entry("CLIPBOARD_COPY_PASTE", ViolationSeverity.MEDIUM),
             Map.entry("RIGHT_CLICK", ViolationSeverity.LOW),
             Map.entry("KEYBOARD_SHORTCUT", ViolationSeverity.MEDIUM)
     );
 
-    public int getPenaltyPoints(String eventType) {
-        return 1;
+    public boolean isHeadOrGaze(String eventType) {
+        if (eventType == null) return false;
+        String u = eventType.toUpperCase();
+        return u.contains("HEAD") || u.contains("GAZE");
+    }
+
+    public boolean isFullscreenOrBlur(String eventType) {
+        if (eventType == null) return false;
+        String u = eventType.toUpperCase();
+        return u.contains("FULLSCREEN") || u.contains("TAB_SWITCH") || u.contains("WINDOW_BLUR");
+    }
+
+    public boolean isAudio(String eventType) {
+        if (eventType == null) return false;
+        String u = eventType.toUpperCase();
+        return u.contains("VOICE") || u.contains("AUDIO") || u.contains("SPEECH") || u.contains("NOISE");
+    }
+
+    /**
+     * Computes the point deduction for a specific event based on historical violations.
+     *
+     * @param eventType the type of violation
+     * @param warningNumber for head/gaze: 1-indexed warning count
+     * @param fullscreenExitCount prior fullscreen exit count
+     * @return points to deduct from integrity score (0 to 50)
+     */
+    public int computeDeduction(String eventType, int warningNumber, int fullscreenExitCount) {
+        if (eventType == null) return 0;
+        String u = eventType.toUpperCase();
+
+        if (u.contains("CELL") || u.contains("PHONE") || u.contains("LAPTOP")) {
+            return ProctoringConstants.DEDUCTION_CELL_PHONE; // 50 points
+        } else if (u.contains("MULTIPLE")) {
+            return ProctoringConstants.DEDUCTION_MULTIPLE_FACES; // 30 points
+        } else if (u.contains("NO_FACE") || u.contains("NOT_VISIBLE")) {
+            return ProctoringConstants.DEDUCTION_NO_FACE; // 20 points
+        } else if (isHeadOrGaze(eventType)) {
+            // First 10 warnings are free (warning only, 0 deduction). From 11th onward, -5 points each.
+            if (warningNumber <= ProctoringConstants.HEAD_GAZE_FREE_WARNINGS) {
+                return 0;
+            } else {
+                return ProctoringConstants.HEAD_GAZE_PENALTY_POINTS; // 5 points
+            }
+        } else if (isFullscreenOrBlur(eventType)) {
+            // First time: warning only. Second time: terminates immediately.
+            return 0;
+        } else if (isAudio(eventType)) {
+            // Audio events (EXTERNAL_VOICE, BACKGROUND_NOISE, etc.) are warning-only (0 points deducted)
+            return ProctoringConstants.DEDUCTION_EXTERNAL_VOICE; // 0 points
+        } else {
+            // Other minor violations (shortcuts, copy-paste)
+            return 5;
+        }
     }
 
     public ViolationSeverity getSeverity(String eventType) {
-        return SEVERITIES.getOrDefault(eventType, ViolationSeverity.LOW);
+        return SEVERITIES.getOrDefault(eventType != null ? eventType.toUpperCase() : "", ViolationSeverity.LOW);
     }
 
-    public double calculateEventScore(List<ProctoringEvent> violations) {
-        if (violations == null || violations.isEmpty()) return 0.0;
-        int totalPenalty = 0;
-        for (ProctoringEvent v : violations) {
-            totalPenalty += v.getPenaltyPoints() != null ? v.getPenaltyPoints() : 0;
-        }
-        return Math.min(100.0, Math.max(0.0, totalPenalty));
-    }
-
-    public double calculateAIBehaviorScore(List<ProctoringEvent> violations) {
-        if (violations == null || violations.isEmpty()) return 0.0;
-
-        // Feature 1: Frequency
-        double frequencyScore = Math.min(100.0, violations.size() * 15.0);
-
-        // Feature 2: Severity distribution
-        int low = 0, med = 0, high = 0, crit = 0;
-        for (ProctoringEvent v : violations) {
-            if (v.getSeverity() == ViolationSeverity.LOW) low++;
-            else if (v.getSeverity() == ViolationSeverity.MEDIUM) med++;
-            else if (v.getSeverity() == ViolationSeverity.HIGH) high++;
-            else if (v.getSeverity() == ViolationSeverity.CRITICAL) crit++;
-        }
-        double severityScore = Math.min(100.0, low * 5.0 + med * 15.0 + high * 30.0 + crit * 50.0);
-
-        // Feature 3: Confidence
-        double avgConf = violations.stream()
-                .mapToDouble(v -> v.getConfidence() != null ? v.getConfidence() : 0.5)
-                .average().orElse(0.5);
-        double confidenceScore = avgConf * 100.0;
-
-        // Feature 4: Event diversity
-        long uniqueTypes = violations.stream().map(ProctoringEvent::getEventType).distinct().count();
-        double diversityScore = Math.min(100.0, (uniqueTypes / 5.0) * 100.0);
-
-        // Feature 5: Repetition
-        Map<String, Integer> counts = new HashMap<>();
-        for (ProctoringEvent v : violations) {
-            counts.put(v.getEventType(), counts.getOrDefault(v.getEventType(), 0) + 1);
-        }
-        int maxRepeat = counts.values().stream().max(Integer::compareTo).orElse(1);
-        double repetitionScore = Math.min(100.0, (maxRepeat / 3.0) * 100.0);
-
-        double composite = frequencyScore * 0.25
-                + severityScore * 0.30
-                + confidenceScore * 0.15
-                + diversityScore * 0.15
-                + repetitionScore * 0.15;
-
-        return Math.min(100.0, Math.max(0.0, Math.round(composite)));
-    }
-
-    public double calculateHybridScore(double eventScore, double aiScore) {
-        double hybrid = eventScore * 0.6 + aiScore * 0.4;
-        return Math.min(100.0, Math.max(0.0, Math.round(hybrid)));
-    }
-
-    public String classify(double hybridScore) {
-        if (hybridScore <= 29.0) return "SAFE";
-        if (hybridScore <= 69.0) return "WARNING";
+    public String classifyIntegrityScore(double integrityScore) {
+        if (integrityScore >= 70.0) return "SAFE";
+        if (integrityScore >= 30.0) return "WARNING";
         return "MALPRACTICE";
     }
 
-    public boolean shouldTerminate(double hybridScore) {
-        return hybridScore >= 70.0;
+    public boolean shouldTerminate(double integrityScore, int fullscreenExits) {
+        return integrityScore <= 0.0 || fullscreenExits >= 2;
     }
 }

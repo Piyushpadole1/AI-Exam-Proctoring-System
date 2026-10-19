@@ -3,19 +3,13 @@ import {
   Box,
   Typography,
   Button,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Stack,
   Grid,
 } from '@mui/material';
 import CustomTextField from '../../../components/forms/theme-elements/CustomTextField';
 import CodingQuestionForm from './CodingQuestionForm';
 
 const CreateExam = ({ formik, title, subtitle, subtext }) => {
-  const { values, errors, touched, handleBlur, handleChange, handleSubmit } = formik;
+  const { values, errors, touched, handleChange, handleSubmit } = formik;
 
   return (
     <>
@@ -85,11 +79,44 @@ const CreateExam = ({ formik, title, subtitle, subtext }) => {
             />
           </Grid>
 
-          <Grid item xs={12} sm={4}>
+          <Grid item xs={12} sm={3}>
+            <CustomTextField
+              id="totalMarks"
+              name="totalMarks"
+              label="Total Marks"
+              type="number"
+              variant="outlined"
+              fullWidth
+              value={values.totalMarks}
+              onChange={handleChange}
+              error={touched.totalMarks && Boolean(errors.totalMarks)}
+              helperText={(touched.totalMarks && errors.totalMarks) || 'Total score across all questions'}
+              placeholder="e.g. 100"
+              required
+            />
+          </Grid>
+          <Grid item xs={12} sm={3}>
+            <CustomTextField
+              id="passingMarks"
+              name="passingMarks"
+              label="Passing Marks"
+              type="number"
+              variant="outlined"
+              fullWidth
+              value={values.passingMarks}
+              onChange={handleChange}
+              error={touched.passingMarks && Boolean(errors.passingMarks)}
+              helperText={(touched.passingMarks && errors.passingMarks) || 'Minimum score to pass'}
+              placeholder="e.g. 40"
+              required
+            />
+          </Grid>
+          <Grid item xs={12} sm={3}>
             <CustomTextField
               id="totalQuestions"
               name="totalQuestions"
               label="Total Questions"
+              type="number"
               variant="outlined"
               fullWidth
               value={values.totalQuestions}
@@ -100,11 +127,12 @@ const CreateExam = ({ formik, title, subtitle, subtext }) => {
               required
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid item xs={12} sm={3}>
             <CustomTextField
               id="duration"
               name="duration"
               label="Duration (minutes)"
+              type="number"
               variant="outlined"
               fullWidth
               value={values.duration}
@@ -115,18 +143,7 @@ const CreateExam = ({ formik, title, subtitle, subtext }) => {
               required
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
-            <CustomTextField
-              id="passingMarks"
-              name="passingMarks"
-              label="Passing Marks (%)"
-              variant="outlined"
-              fullWidth
-              value={values.passingMarks || ''}
-              onChange={handleChange}
-              placeholder="e.g. 40"
-            />
-          </Grid>
+
 
           <Grid item xs={12} sm={6}>
             <CustomTextField

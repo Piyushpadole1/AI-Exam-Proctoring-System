@@ -49,7 +49,6 @@ const DescriptionAndInstructions = () => {
     (e) => e.examId === examId || String(e._id) === String(examId) || String(e.id) === String(examId)
   );
   const isTeacher = (userInfo?.role || '').toLowerCase().includes('teacher');
-  const isStudent = (userInfo?.role || '').toLowerCase().includes('student');
 
   useEffect(() => {
     if (examId) {

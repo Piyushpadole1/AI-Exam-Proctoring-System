@@ -7,11 +7,8 @@ import {
   Stack,
   Typography,
   Chip,
-  Paper,
   Divider,
 } from '@mui/material';
-import FlagIcon from '@mui/icons-material/Flag';
-import CheckIcon from '@mui/icons-material/Check';
 import { toast } from 'react-toastify';
 
 const NumberOfQuestions = ({

@@ -13,7 +13,7 @@ import { toast } from 'react-toastify';
 import axiosInstance from '../../axios';
 
 const TestPage = () => {
-  const { examId, testId } = useParams();
+  const { examId } = useParams();
   const [selectedExam, setSelectedExam] = useState(null);
   const [examDurationInSeconds, setExamDurationInSeconds] = useState(0);
   const { data: userExamdata, isLoading: isExamsLoading } = useGetExamsQuery();
@@ -28,7 +28,6 @@ const TestPage = () => {
   const webcamRef = useRef(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isMcqCompleted, setIsMcqCompleted] = useState(false);
 
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [permissionsError, setPermissionsError] = useState('');
@@ -131,11 +130,14 @@ const TestPage = () => {
     }
   }, [data]);
 
-  const handleMcqCompletion = () => {
+  const handleMcqCompletion = (answersToSubmit) => {
+    const finalAnswers = (answersToSubmit && Object.keys(answersToSubmit).length > 0)
+      ? answersToSubmit
+      : (answers && Object.keys(answers).length > 0 ? answers : {});
     if (selectedExam?.hasCodingRound) {
-      navigate(`/exam/${examId}/codedetails`, { state: { mcqAnswers: answers, sessionId } });
+      navigate(`/exam/${examId}/codedetails`, { state: { mcqAnswers: finalAnswers, sessionId } });
     } else {
-      handleTestSubmission(answers);
+      handleTestSubmission(finalAnswers);
     }
   };
 
@@ -176,7 +178,7 @@ const TestPage = () => {
   };
   
   const handleTerminate = async (reason) => {
-    const finalReason = reason || 'Exam terminated: Malpractice threshold exceeded (6 violations reached).';
+    const finalReason = reason || 'Exam terminated: Integrity score reached 0 or proctoring policy violated.';
     toast.error(finalReason);
     setIsExamActive(false);
     try {
@@ -263,7 +265,7 @@ const TestPage = () => {
                   <CircularProgress />
                 ) : (
                   <MultipleChoiceQuestion
-                    submitTest={handleTestSubmission}
+                    submitTest={handleMcqCompletion}
                     questions={questions}
                     currentQuestion={currentQuestionIndex}
                     setCurrentQuestion={setCurrentQuestionIndex}
@@ -299,7 +301,7 @@ const TestPage = () => {
                       setCurrentQuestion={setCurrentQuestionIndex}
                       answers={answers}
                       flaggedQuestions={flaggedQuestions}
-                      submitTest={handleTestSubmission}
+                      submitTest={handleMcqCompletion}
                       examDurationInSeconds={examDurationInSeconds}
                     />
                   </Box>

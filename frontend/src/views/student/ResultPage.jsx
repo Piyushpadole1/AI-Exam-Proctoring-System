@@ -27,7 +27,6 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
-  Divider,
   Tooltip,
   CardMedia,
 } from '@mui/material';
@@ -40,11 +39,8 @@ import {
   VisibilityOff,
   Assessment,
   Close,
-  Warning,
   Image as ImageIcon,
   CheckCircleOutline,
-  School,
-  Grade,
 } from '@mui/icons-material';
 import PageContainer from 'src/components/container/PageContainer';
 import DashboardCard from '../../components/shared/DashboardCard';
@@ -244,17 +240,24 @@ const ResultPage = () => {
               </Grid>
             </Paper>
 
+            {/* Termination Notice if applicable */}
+            {detailedReport.terminationReason && (
+              <Alert severity="error" sx={{ mb: 2.5 }}>
+                <strong>Session Terminated:</strong> {detailedReport.terminationReason}
+              </Alert>
+            )}
+
             {/* Performance Summary Cards */}
             <Grid container spacing={2} mb={3}>
-              <Grid item xs={6} sm={3}>
+              <Grid item xs={6} sm={2.4}>
                 <Card sx={{ textAlign: 'center', p: 1, bgcolor: '#e3f2fd' }}>
-                  <Typography variant="caption" color="textSecondary">Score</Typography>
+                  <Typography variant="caption" color="textSecondary">Academic Score</Typography>
                   <Typography variant="h5" fontWeight="bold" color="primary.main">
                     {detailedReport.score} / {detailedReport.totalMarks}
                   </Typography>
                 </Card>
               </Grid>
-              <Grid item xs={6} sm={3}>
+              <Grid item xs={6} sm={2.4}>
                 <Card sx={{ textAlign: 'center', p: 1, bgcolor: '#e8f5e9' }}>
                   <Typography variant="caption" color="textSecondary">Percentage</Typography>
                   <Typography variant="h5" fontWeight="bold" color="success.main">
@@ -262,7 +265,7 @@ const ResultPage = () => {
                   </Typography>
                 </Card>
               </Grid>
-              <Grid item xs={6} sm={3}>
+              <Grid item xs={6} sm={2.4}>
                 <Card sx={{ textAlign: 'center', p: 1, bgcolor: detailedReport.passed ? '#e8f5e9' : '#ffebee' }}>
                   <Typography variant="caption" color="textSecondary">Result</Typography>
                   <Box mt={0.5}>
@@ -270,7 +273,25 @@ const ResultPage = () => {
                   </Box>
                 </Card>
               </Grid>
-              <Grid item xs={6} sm={3}>
+              <Grid item xs={6} sm={2.4}>
+                <Card sx={{ textAlign: 'center', p: 1, bgcolor: '#e0f2f1' }}>
+                  <Typography variant="caption" color="textSecondary">Integrity Score</Typography>
+                  <Typography
+                    variant="h5"
+                    fontWeight="bold"
+                    color={
+                      (detailedReport.integrityScore ?? detailedReport.fairnessScore ?? 100) >= 70
+                        ? 'success.main'
+                        : (detailedReport.integrityScore ?? detailedReport.fairnessScore ?? 100) >= 30
+                        ? 'warning.main'
+                        : 'error.main'
+                    }
+                  >
+                    {detailedReport.integrityScore ?? detailedReport.fairnessScore ?? 100} / 100
+                  </Typography>
+                </Card>
+              </Grid>
+              <Grid item xs={6} sm={2.4}>
                 <Card sx={{ textAlign: 'center', p: 1, bgcolor: '#fff3e0' }}>
                   <Typography variant="caption" color="textSecondary">Violations</Typography>
                   <Typography variant="h5" fontWeight="bold" color="warning.main">
@@ -518,6 +539,7 @@ const ResultPage = () => {
                       <TableCell><strong>Exam Name</strong></TableCell>
                       <TableCell><strong>Score</strong></TableCell>
                       <TableCell><strong>Percentage</strong></TableCell>
+                      <TableCell><strong>Integrity Score</strong></TableCell>
                       <TableCell><strong>Status</strong></TableCell>
                       <TableCell><strong>Submission Date</strong></TableCell>
                       <TableCell align="center"><strong>Detailed Report</strong></TableCell>
@@ -527,7 +549,7 @@ const ResultPage = () => {
                   <TableBody>
                     {results.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} align="center">
+                        <TableCell colSpan={8} align="center">
                           <Typography variant="body1" color="textSecondary" py={4}>
                             No exam results available yet. Once you complete an exam, your scores and reports will appear here.
                           </Typography>
@@ -563,6 +585,21 @@ const ResultPage = () => {
                                 label={`${Number(result.percentage || 0).toFixed(1)}%`}
                                 color={result.percentage >= 70 ? 'success' : result.percentage >= 40 ? 'warning' : 'error'}
                                 size="small"
+                                sx={{ fontWeight: 'bold' }}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={`${result.integrityScore ?? result.fairnessScore ?? 100} / 100`}
+                                color={
+                                  (result.integrityScore ?? result.fairnessScore ?? 100) >= 70
+                                    ? 'success'
+                                    : (result.integrityScore ?? result.fairnessScore ?? 100) >= 30
+                                    ? 'warning'
+                                    : 'error'
+                                }
+                                size="small"
+                                variant="outlined"
                                 sx={{ fontWeight: 'bold' }}
                               />
                             </TableCell>

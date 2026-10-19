@@ -105,10 +105,22 @@ public class ExamService {
         exam.setExamDate(request.getExamDate());
         exam.setStartTime(request.getStartTime());
         exam.setEndTime(request.getEndTime());
+        Double totalMarks = request.getTotalMarks() != null ? request.getTotalMarks() : 100.0;
+        if (totalMarks <= 0) {
+            throw new IllegalArgumentException("Total marks must be a positive number.");
+        }
+        Double passingMarks = request.getPassingMarks() != null ? request.getPassingMarks() : 40.0;
+        if (passingMarks <= 0) {
+            throw new IllegalArgumentException("Passing marks must be greater than 0.");
+        }
+        if (passingMarks > totalMarks) {
+            throw new IllegalArgumentException("Passing marks (" + passingMarks + ") cannot exceed total marks (" + totalMarks + ").");
+        }
+
         exam.setDurationMinutes(request.getDurationMinutes() != null ? request.getDurationMinutes() : 30);
         exam.setTotalQuestions(request.getTotalQuestions() != null ? request.getTotalQuestions() : 0);
-        exam.setTotalMarks(request.getTotalMarks() != null ? request.getTotalMarks() : 100.0);
-        exam.setPassingMarks(request.getPassingMarks() != null ? request.getPassingMarks() : 40.0);
+        exam.setTotalMarks(totalMarks);
+        exam.setPassingMarks(passingMarks);
         exam.setHasCodingRound(Boolean.TRUE.equals(request.getHasCodingRound()));
         exam.setCodingMarks(request.getCodingMarks() != null ? request.getCodingMarks() : 0.0);
         exam.setStatus("PUBLISHED");
@@ -203,12 +215,19 @@ public class ExamService {
             }
             exam.setTotalQuestions(request.getTotalQuestions());
         }
-        if (request.getTotalMarks() != null) {
-            exam.setTotalMarks(request.getTotalMarks());
+        Double newTotalMarks = request.getTotalMarks() != null ? request.getTotalMarks() : exam.getTotalMarks();
+        if (newTotalMarks <= 0) {
+            throw new IllegalArgumentException("Total marks must be a positive number.");
         }
-        if (request.getPassingMarks() != null) {
-            exam.setPassingMarks(request.getPassingMarks());
+        Double newPassingMarks = request.getPassingMarks() != null ? request.getPassingMarks() : exam.getPassingMarks();
+        if (newPassingMarks <= 0) {
+            throw new IllegalArgumentException("Passing marks must be greater than 0.");
         }
+        if (newPassingMarks > newTotalMarks) {
+            throw new IllegalArgumentException("Passing marks (" + newPassingMarks + ") cannot exceed total marks (" + newTotalMarks + ").");
+        }
+        exam.setTotalMarks(newTotalMarks);
+        exam.setPassingMarks(newPassingMarks);
         if (request.getHasCodingRound() != null) {
             exam.setHasCodingRound(request.getHasCodingRound());
         }

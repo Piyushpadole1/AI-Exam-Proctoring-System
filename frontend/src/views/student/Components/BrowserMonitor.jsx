@@ -1,128 +1,184 @@
 /**
- * BrowserMonitor — Detects tab switching, window blur, fullscreen exit,
- * copy/paste, and keyboard shortcuts during an exam.
- *
- * Non-visual component (no UI) — just attaches event listeners.
+ * BrowserMonitor — Enforces Fullscreen Lock and blocks evasive browser actions:
+ *   - Detects leaving fullscreen (fullscreenchange / webkitfullscreenchange)
+ *   - Detects window minimize / tab switch (visibilitychange)
+ *   - Detects window blur
+ *   - Fullscreen rule: 1st strike = warning modal with re-enter prompt, 2nd strike = immediate termination
+ *   - Disables right-click, text selection, copy/paste, and navigation shortcuts
  */
 import { useEffect, useRef, useCallback } from 'react';
 import PROCTORING_CONFIG from '../../../config/proctoring';
 
-export default function BrowserMonitor({ onViolation, isActive }) {
+export default function BrowserMonitor({ onViolation, isActive, onFullscreenWarning }) {
   const lastEventTime = useRef({});
-  const fullscreenRequested = useRef(false);
+  const fullscreenStrikeCount = useRef(0);
+  const isEnforcingFullscreen = useRef(false);
 
-  const throttle = useCallback(
-    (eventType) => {
-      const now = Date.now();
-      const cooldown = PROCTORING_CONFIG.cooldowns[eventType] || 5000;
-      const lastTime = lastEventTime.current[eventType] || 0;
-      if (now - lastTime < cooldown) return false;
-      lastEventTime.current[eventType] = now;
-      return true;
-    },
-    [],
-  );
+  const onViolationRef = useRef(onViolation);
+  useEffect(() => {
+    onViolationRef.current = onViolation;
+  }, [onViolation]);
 
-  const emit = useCallback(
-    (eventType, metadata = {}) => {
+  const onFullscreenWarningRef = useRef(onFullscreenWarning);
+  useEffect(() => {
+    onFullscreenWarningRef.current = onFullscreenWarning;
+  }, [onFullscreenWarning]);
+
+  const throttle = useCallback((eventType) => {
+    const now = Date.now();
+    const cooldown = PROCTORING_CONFIG.COOLDOWNS[eventType] || 3000;
+    const lastTime = lastEventTime.current[eventType] || 0;
+    if (now - lastTime < cooldown) return false;
+    lastEventTime.current[eventType] = now;
+    return true;
+  }, []);
+
+  const handleFullscreenBreach = useCallback(
+    (reason) => {
       if (!isActive) return;
-      if (!throttle(eventType)) return;
-      onViolation({
-        eventType,
-        confidence: 1.0,
-        description: `${eventType} detected by browser monitor`,
-        metadata,
-      });
+      if (!throttle('FULLSCREEN_EXIT')) return;
+
+      fullscreenStrikeCount.current += 1;
+      const strike = fullscreenStrikeCount.current;
+      const isSecondStrike = strike >= 2;
+
+      console.warn(`[BrowserMonitor] Fullscreen breach detected (${reason}). Strike: ${strike}/2`);
+
+      if (onViolationRef.current) {
+        onViolationRef.current({
+          eventType: 'FULLSCREEN_EXIT',
+          confidence: 1.0,
+          description: isSecondStrike
+            ? 'Left fullscreen second time: Exam terminated immediately'
+            : 'Left fullscreen or minimized window (Warning 1 of 1)',
+          strike,
+          forceTerminate: isSecondStrike,
+          terminationReason: isSecondStrike ? 'Left fullscreen twice' : null,
+          metadata: {
+            reason,
+            strike,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
+      if (onFullscreenWarningRef.current && !isSecondStrike) {
+        onFullscreenWarningRef.current(strike);
+      }
     },
-    [isActive, onViolation, throttle],
+    [isActive, throttle]
   );
 
   useEffect(() => {
     if (!isActive) return;
 
-    // ── Tab Switching ──────────────────────────────────────────────
+    // ── 1. Tab Switching & Window Minimizing (visibilitychange) ──────
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        emit('TAB_SWITCH', { hiddenAt: new Date().toISOString() });
+        handleFullscreenBreach('Tab switched or browser minimized');
       }
     };
 
-    // ── Window Blur ────────────────────────────────────────────────
+    // ── 2. Window Blur (Lost Window Focus) ───────────────────────────
     const handleBlur = () => {
-      emit('WINDOW_BLUR', { blurredAt: new Date().toISOString() });
+      handleFullscreenBreach('Window lost focus / switched application');
     };
 
-    // ── Fullscreen Exit ────────────────────────────────────────────
+    // ── 3. Fullscreen Exit Event ─────────────────────────────────────
     const handleFullscreenChange = () => {
-      if (
-        fullscreenRequested.current &&
-        !document.fullscreenElement &&
-        !document.webkitFullscreenElement
-      ) {
-        emit('FULLSCREEN_EXIT', { exitedAt: new Date().toISOString() });
+      const isCurrentlyFullscreen = Boolean(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement
+      );
+
+      if (!isCurrentlyFullscreen && isEnforcingFullscreen.current) {
+        handleFullscreenBreach('Exited full screen mode');
       }
     };
 
-    // ── Copy / Paste / Cut ─────────────────────────────────────────
+    // ── 4. Disable Copy, Paste, Cut ──────────────────────────────────
     const handleCopy = (e) => {
       e.preventDefault();
-      emit('COPY_PASTE', { action: 'copy' });
+      if (throttle('COPY_PASTE')) {
+        onViolation?.({
+          eventType: 'COPY_PASTE',
+          confidence: 1.0,
+          description: 'Copy attempt blocked',
+        });
+      }
     };
+
     const handlePaste = (e) => {
       e.preventDefault();
-      emit('COPY_PASTE', { action: 'paste' });
+      if (throttle('COPY_PASTE')) {
+        onViolation?.({
+          eventType: 'COPY_PASTE',
+          confidence: 1.0,
+          description: 'Paste attempt blocked',
+        });
+      }
     };
+
     const handleCut = (e) => {
       e.preventDefault();
-      emit('COPY_PASTE', { action: 'cut' });
     };
 
-    // ── Context Menu (Right Click) ─────────────────────────────────
+    // ── 5. Disable Right-Click Context Menu ──────────────────────────
     const handleContextMenu = (e) => {
       e.preventDefault();
-      emit('RIGHT_CLICK');
+      return false;
     };
 
-    // ── Keyboard Shortcuts ─────────────────────────────────────────
-    const handleKeyDown = (e) => {
-      // Detect suspicious shortcuts
-      if (e.ctrlKey || e.metaKey) {
-        const key = e.key.toLowerCase();
-        if (['c', 'v', 'x', 'tab', 'p', 'a', 'f', 'u'].includes(key)) {
-          e.preventDefault();
-          emit('KEYBOARD_SHORTCUT', {
-            key: `${e.ctrlKey ? 'Ctrl' : 'Cmd'}+${e.key}`,
-          });
-        }
-      }
-      // Alt key combos
-      if (e.altKey && e.key === 'Tab') {
-        // Note: Alt+Tab usually isn't reliably caught, but we try
-        emit('KEYBOARD_SHORTCUT', { key: 'Alt+Tab' });
-      }
-      // F12
-      if (e.key === 'F12') {
+    // ── 6. Disable Text Selection ────────────────────────────────────
+    const handleSelectStart = (e) => {
+      // Allow inputs and textareas
+      if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
         e.preventDefault();
-        emit('KEYBOARD_SHORTCUT', { key: 'F12' });
       }
     };
 
-    // ── Request Fullscreen ─────────────────────────────────────────
-    const requestFullscreen = () => {
+    // ── 7. Disable Navigation & Shortcut Keys ────────────────────────
+    const handleKeyDown = (e) => {
+      const key = e.key ? e.key.toLowerCase() : '';
+      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+
+      // Block F11 (browser fullscreen toggle) and F12 (dev tools)
+      if (e.key === 'F11' || e.key === 'F12') {
+        e.preventDefault();
+      }
+
+      // Block Ctrl+W (close tab), Ctrl+T (new tab), Ctrl+N (new window)
+      if (isCtrlOrMeta && ['w', 't', 'n', 'r', 'tab', 'u', 'p', 's'].includes(key)) {
+        e.preventDefault();
+      }
+
+      // Block Alt+Tab or Alt+Left/Right
+      if (e.altKey && (key === 'tab' || key === 'arrowleft' || key === 'arrowright')) {
+        e.preventDefault();
+      }
+    };
+
+    // Request fullscreen on mounting proctoring monitor
+    const requestFullscreen = async () => {
       try {
         const el = document.documentElement;
-        if (el.requestFullscreen) {
-          el.requestFullscreen().then(() => {
-            fullscreenRequested.current = true;
-          }).catch(() => {});
-        } else if (el.webkitRequestFullscreen) {
-          el.webkitRequestFullscreen();
-          fullscreenRequested.current = true;
+        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+          if (el.requestFullscreen) {
+            await el.requestFullscreen();
+          } else if (el.webkitRequestFullscreen) {
+            await el.webkitRequestFullscreen();
+          }
         }
+        isEnforcingFullscreen.current = true;
       } catch (err) {
-        console.warn('Fullscreen request failed:', err);
+        console.warn('[BrowserMonitor] Fullscreen initial request note:', err.message);
+        isEnforcingFullscreen.current = true;
       }
     };
+
+    requestFullscreen();
 
     // Attach listeners
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -133,12 +189,9 @@ export default function BrowserMonitor({ onViolation, isActive }) {
     document.addEventListener('paste', handlePaste);
     document.addEventListener('cut', handleCut);
     document.addEventListener('contextmenu', handleContextMenu);
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('selectstart', handleSelectStart);
+    window.addEventListener('keydown', handleKeyDown, true);
 
-    // Request fullscreen on mount
-    requestFullscreen();
-
-    // Cleanup
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
@@ -148,16 +201,11 @@ export default function BrowserMonitor({ onViolation, isActive }) {
       document.removeEventListener('paste', handlePaste);
       document.removeEventListener('cut', handleCut);
       document.removeEventListener('contextmenu', handleContextMenu);
-      document.removeEventListener('keydown', handleKeyDown);
-
-      // Exit fullscreen
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      }
-      fullscreenRequested.current = false;
+      document.removeEventListener('selectstart', handleSelectStart);
+      window.removeEventListener('keydown', handleKeyDown, true);
+      isEnforcingFullscreen.current = false;
     };
-  }, [isActive, emit]);
+  }, [isActive, handleFullscreenBreach, onViolation, throttle]);
 
-  // No UI — this is a headless monitoring component
   return null;
 }

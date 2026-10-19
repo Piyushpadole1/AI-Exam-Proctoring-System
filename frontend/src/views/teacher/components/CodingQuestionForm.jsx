@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   TextField,
   Box,
@@ -14,7 +14,6 @@ import {
   Card,
   CardContent,
   IconButton,
-  Stack,
   Divider,
   Chip,
   Alert,
@@ -24,7 +23,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CodeIcon from '@mui/icons-material/Code';
 
 const CodingQuestionForm = ({ formik }) => {
-  const { values, setFieldValue, errors, touched } = formik;
+  const { values, setFieldValue } = formik;
   const hasCoding = Boolean(values.hasCodingRound);
 
   const sampleTestCases = values.codingQuestion?.sampleTestCases || [

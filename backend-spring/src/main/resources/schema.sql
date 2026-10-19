@@ -181,6 +181,7 @@ CREATE TABLE exam_attempts (
     percentage DOUBLE NULL DEFAULT 0.0,
     passed BIT(1) NULL DEFAULT 0,
     integrity_score DOUBLE NOT NULL DEFAULT 100.0,
+    termination_reason VARCHAR(255) NULL,
     saved_answers LONGTEXT NULL,
     device_info TEXT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -227,6 +228,9 @@ CREATE TABLE proctoring_events (
     severity ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL DEFAULT 'LOW',
     confidence DOUBLE NOT NULL DEFAULT 1.0,
     penalty_points INT NOT NULL DEFAULT 0,
+    points_deducted INT NOT NULL DEFAULT 0,
+    integrity_score_after DOUBLE NOT NULL DEFAULT 100.0,
+    warning_number INT NULL,
     description VARCHAR(255) NULL,
     evidence_url LONGTEXT NULL,
     metadata_json TEXT NULL,
@@ -256,4 +260,24 @@ CREATE TABLE cheating_logs (
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),
     KEY idx_cheating_exam_email (exam_id, email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+-- 11. Table: notifications
+-- Real-time notifications for teachers and students
+-- ---------------------------------------------------------------------
+CREATE TABLE notifications (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    recipient_id BIGINT NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    message TEXT NOT NULL,
+    related_exam_id VARCHAR(64) NULL,
+    related_request_id BIGINT NULL,
+    link VARCHAR(255) NULL,
+    is_read BIT(1) NOT NULL DEFAULT b'0',
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    KEY idx_notifications_recipient (recipient_id, is_read, created_at),
+    CONSTRAINT fk_notifications_recipient FOREIGN KEY (recipient_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

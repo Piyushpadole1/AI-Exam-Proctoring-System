@@ -83,10 +83,12 @@ const Router = createBrowserRouter(
             <Route path="/add-questions" exact={true} element={<AddQuestions />} />
             <Route path="/exam-log" exact={true} element={<ExamLogPage />} />
             <Route path="/user-approvals" exact={true} element={<UserApprovalsPage />} />
+            <Route path="/teacher/approvals" exact={true} element={<Navigate to="/user-approvals" replace />} />
             <Route path="/admin-dashboard" exact={true} element={<AdminDashboard />} />
             <Route path="/analytics" exact={true} element={<AnalyticsPage />} />
             <Route path="/live-monitoring" exact={true} element={<LiveMonitoringPage />} />
           </Route>
+          <Route path="/student/exams" exact={true} element={<Navigate to="/exam" replace />} />
         </Route>
         <Route path="/" element={<ExamLayout />}>
           <Route path="exam/:examId" exact={true} element={<ExamDetails />} />

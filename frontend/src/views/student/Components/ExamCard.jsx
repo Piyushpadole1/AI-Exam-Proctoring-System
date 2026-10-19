@@ -9,7 +9,6 @@ import LockIcon from '@mui/icons-material/Lock';
 import { useNavigate } from 'react-router-dom';
 import DeleteIcon from '../../teacher/components/DeleteIcon';
 import { useSelector } from 'react-redux';
-import { toast } from 'react-toastify';
 
 const defaultImg =
   'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80';
@@ -119,7 +118,7 @@ export default function ExamCard({ exam }) {
 
           <Stack direction="row" alignItems="center" justifyContent="space-between" mt={2} pt={1} sx={{ borderTop: '1px solid #f0f0f0' }}>
             <Typography variant="body2" color="textSecondary" fontWeight={500}>
-              {totalQuestions || 0} Questions
+              {totalQuestions || 0} Questions{totalMarks ? ` (${totalMarks} pts)` : ''}
             </Typography>
             <Typography variant="body2" color="textSecondary" fontWeight={500}>
               {duration ? `${duration} mins` : '30 mins'}

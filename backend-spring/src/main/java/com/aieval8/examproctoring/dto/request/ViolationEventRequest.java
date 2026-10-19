@@ -18,9 +18,19 @@ public class ViolationEventRequest {
 
     private String evidenceUrl;
 
+    private String violationId;
+
     private Map<String, Object> metadata;
 
     public ViolationEventRequest() {
+    }
+
+    public String getViolationId() {
+        return violationId;
+    }
+
+    public void setViolationId(String violationId) {
+        this.violationId = violationId;
     }
 
     public Long getSessionId() {

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Box,
   Card,
-  CardContent,
   Typography,
   Button,
   Grid,
@@ -38,16 +37,13 @@ import QuizIcon from '@mui/icons-material/Quiz';
 import CodeIcon from '@mui/icons-material/Code';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import PageContainer from '../../components/container/PageContainer';
 import { useNavigate } from 'react-router-dom';
-import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 import axiosInstance from '../../axios';
 
 const TeacherExamsPage = () => {
   const navigate = useNavigate();
-  const { userInfo } = useSelector((state) => state.auth);
 
   const [exams, setExams] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -175,6 +171,7 @@ const TeacherExamsPage = () => {
       description: exam.description || '',
       examPassword: exam.examPassword || '',
       duration: exam.duration || 30,
+      totalMarks: exam.totalMarks || 100,
       totalQuestions: exam.totalQuestions || 0,
       passingMarks: exam.passingMarks || 40,
       liveDate: exam.liveDate ? exam.liveDate.substring(0, 16) : '',
@@ -189,6 +186,19 @@ const TeacherExamsPage = () => {
   // Submit Edit Exam
   const handleSaveEditExam = async () => {
     if (!editExamData) return;
+
+    const tMarks = Number(editExamData.totalMarks || 100);
+    const pMarks = Number(editExamData.passingMarks || 40);
+
+    if (tMarks <= 0) {
+      toast.error('Total Marks must be a positive number');
+      return;
+    }
+    if (pMarks <= 0 || pMarks > tMarks) {
+      toast.error('Passing Marks must be greater than 0 and less than or equal to Total Marks');
+      return;
+    }
+
     setIsUpdating(true);
     try {
       const payload = {
@@ -196,8 +206,9 @@ const TeacherExamsPage = () => {
         subject: editExamData.subject,
         description: editExamData.description,
         duration: Number(editExamData.duration),
+        totalMarks: tMarks,
         totalQuestions: Number(editExamData.totalQuestions),
-        passingMarks: Number(editExamData.passingMarks),
+        passingMarks: pMarks,
         hasCodingRound: Boolean(editExamData.hasCodingRound),
         codingMarks: editExamData.hasCodingRound ? Number(editExamData.codingMarks || 20) : 0,
         liveDate: editExamData.liveDate,
@@ -275,6 +286,28 @@ const TeacherExamsPage = () => {
   const handleSaveQuestion = async () => {
     if (!questionFormData.question.trim()) {
       toast.warning('Question statement cannot be empty');
+      return;
+    }
+
+    const questionMarks = Number(questionFormData.marks || 1);
+    if (questionMarks <= 0) {
+      toast.warning('Marks must be greater than 0');
+      return;
+    }
+
+    // Check Total Marks allocation
+    const examTotalMarks = Number(selectedExamForQuestions?.totalMarks || 100);
+    const codingMarksAllocated = selectedExamForQuestions?.hasCodingRound ? Number(selectedExamForQuestions?.codingMarks || 20) : 0;
+    const editingId = editingQuestion ? (editingQuestion._id || editingQuestion.id) : null;
+    const currentMcqWithoutThis = examQuestions
+      .filter((q) => (q._id || q.id) !== editingId)
+      .reduce((sum, q) => sum + Number(q.marks || 1), 0);
+    const newTotalAllocated = currentMcqWithoutThis + questionMarks + codingMarksAllocated;
+
+    if (newTotalAllocated > examTotalMarks) {
+      toast.error(
+        `Cannot assign ${questionMarks} marks. Total allocated would reach ${newTotalAllocated}, which exceeds Exam Total Marks (${examTotalMarks}) by ${newTotalAllocated - examTotalMarks}.`
+      );
       return;
     }
 
@@ -542,7 +575,27 @@ const TeacherExamsPage = () => {
                     onChange={(e) => setEditExamData({ ...editExamData, description: e.target.value })}
                   />
                 </Grid>
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    label="Total Marks"
+                    value={editExamData.totalMarks}
+                    onChange={(e) => setEditExamData({ ...editExamData, totalMarks: e.target.value })}
+                    required
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    label="Passing Marks"
+                    value={editExamData.passingMarks}
+                    onChange={(e) => setEditExamData({ ...editExamData, passingMarks: e.target.value })}
+                    required
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
                   <TextField
                     fullWidth
                     type="number"
@@ -552,20 +605,11 @@ const TeacherExamsPage = () => {
                     required
                   />
                 </Grid>
-                <Grid item xs={12} sm={4}>
-                  <TextField
-                    fullWidth
-                    type="number"
-                    label="Passing Marks (%)"
-                    value={editExamData.passingMarks}
-                    onChange={(e) => setEditExamData({ ...editExamData, passingMarks: e.target.value })}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={3}>
                   <TextField
                     fullWidth
                     label="Exam Password"
-                    placeholder="Leave blank to keep current"
+                    placeholder="Leave blank to keep"
                     value={editExamData.examPassword}
                     onChange={(e) => setEditExamData({ ...editExamData, examPassword: e.target.value })}
                   />
@@ -729,6 +773,46 @@ const TeacherExamsPage = () => {
             </Button>
           </DialogTitle>
           <DialogContent dividers>
+            {/* Running Sum Allocation Banner */}
+            {(() => {
+              const mcqMarksSum = examQuestions.reduce((sum, q) => sum + Number(q.marks || 1), 0);
+              const codingMarksAllocated = selectedExamForQuestions?.hasCodingRound ? Number(selectedExamForQuestions?.codingMarks || 20) : 0;
+              const totalAllocatedMarks = mcqMarksSum + codingMarksAllocated;
+              const examTotalMarks = Number(selectedExamForQuestions?.totalMarks || 100);
+              const isMatch = totalAllocatedMarks === examTotalMarks;
+              const isUnder = totalAllocatedMarks < examTotalMarks;
+
+              return (
+                <Alert
+                  severity={isMatch ? 'success' : isUnder ? 'warning' : 'error'}
+                  sx={{ mb: 2.5 }}
+                >
+                  <Box display="flex" justifyContent="space-between" alignItems="center" width="100%" flexWrap="wrap" gap={1}>
+                    <div>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        Allocated {totalAllocatedMarks} of {examTotalMarks} Total Marks
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        MCQ Questions ({examQuestions.length}): <strong>{mcqMarksSum} marks</strong>
+                        {selectedExamForQuestions?.hasCodingRound ? ` • Coding Round: ${codingMarksAllocated} marks` : ''}
+                      </Typography>
+                    </div>
+                    <Chip
+                      label={
+                        isMatch
+                          ? 'Marks Exactly Match (100% Allocated)'
+                          : isUnder
+                          ? `${examTotalMarks - totalAllocatedMarks} marks remaining to allocate`
+                          : `Exceeds Total Marks by ${totalAllocatedMarks - examTotalMarks} marks`
+                      }
+                      color={isMatch ? 'success' : isUnder ? 'warning' : 'error'}
+                      sx={{ fontWeight: 'bold' }}
+                    />
+                  </Box>
+                </Alert>
+              );
+            })()}
+
             {newQuestionMode ? (
               <Box p={1}>
                 <Typography variant="h6" fontWeight="bold" mb={2}>

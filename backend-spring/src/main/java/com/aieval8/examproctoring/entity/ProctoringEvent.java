@@ -28,11 +28,23 @@ public class ProctoringEvent {
     @Column(name = "penalty_points", nullable = false)
     private Integer penaltyPoints = 0;
 
+    @Column(name = "points_deducted", nullable = false)
+    private Integer pointsDeducted = 0;
+
+    @Column(name = "integrity_score_after", nullable = false)
+    private Double integrityScoreAfter = 100.0;
+
+    @Column(name = "warning_number")
+    private Integer warningNumber;
+
     @Column(length = 255)
     private String description;
 
     @Column(name = "evidence_url", columnDefinition = "LONGTEXT")
     private String evidenceUrl;
+
+    @Column(name = "violation_id", length = 100)
+    private String violationId;
 
     @Column(name = "metadata_json", columnDefinition = "TEXT")
     private String metadataJson;
@@ -46,11 +58,29 @@ public class ProctoringEvent {
     public ProctoringEvent(ProctoringSession session, String eventType, ViolationSeverity severity,
                            Double confidence, Integer penaltyPoints, String description,
                            String evidenceUrl, String metadataJson) {
+        this(session, null, eventType, severity, confidence, penaltyPoints, 0, 100.0, null, description, evidenceUrl, metadataJson);
+    }
+
+    public ProctoringEvent(ProctoringSession session, String eventType, ViolationSeverity severity,
+                           Double confidence, Integer penaltyPoints, Integer pointsDeducted,
+                           Double integrityScoreAfter, Integer warningNumber,
+                           String description, String evidenceUrl, String metadataJson) {
+        this(session, null, eventType, severity, confidence, penaltyPoints, pointsDeducted, integrityScoreAfter, warningNumber, description, evidenceUrl, metadataJson);
+    }
+
+    public ProctoringEvent(ProctoringSession session, String violationId, String eventType, ViolationSeverity severity,
+                           Double confidence, Integer penaltyPoints, Integer pointsDeducted,
+                           Double integrityScoreAfter, Integer warningNumber,
+                           String description, String evidenceUrl, String metadataJson) {
         this.session = session;
+        this.violationId = violationId;
         this.eventType = eventType;
         this.severity = severity != null ? severity : ViolationSeverity.LOW;
         this.confidence = confidence != null ? confidence : 1.0;
         this.penaltyPoints = penaltyPoints != null ? penaltyPoints : 0;
+        this.pointsDeducted = pointsDeducted != null ? pointsDeducted : 0;
+        this.integrityScoreAfter = integrityScoreAfter != null ? integrityScoreAfter : 100.0;
+        this.warningNumber = warningNumber;
         this.description = description;
         this.evidenceUrl = evidenceUrl;
         this.metadataJson = metadataJson;
@@ -113,6 +143,30 @@ public class ProctoringEvent {
         this.penaltyPoints = penaltyPoints;
     }
 
+    public Integer getPointsDeducted() {
+        return pointsDeducted;
+    }
+
+    public void setPointsDeducted(Integer pointsDeducted) {
+        this.pointsDeducted = pointsDeducted;
+    }
+
+    public Double getIntegrityScoreAfter() {
+        return integrityScoreAfter;
+    }
+
+    public void setIntegrityScoreAfter(Double integrityScoreAfter) {
+        this.integrityScoreAfter = integrityScoreAfter;
+    }
+
+    public Integer getWarningNumber() {
+        return warningNumber;
+    }
+
+    public void setWarningNumber(Integer warningNumber) {
+        this.warningNumber = warningNumber;
+    }
+
     public String getDescription() {
         return description;
     }
@@ -143,5 +197,13 @@ public class ProctoringEvent {
 
     public void setTimestamp(LocalDateTime timestamp) {
         this.timestamp = timestamp;
+    }
+
+    public String getViolationId() {
+        return violationId;
+    }
+
+    public void setViolationId(String violationId) {
+        this.violationId = violationId;
     }
 }

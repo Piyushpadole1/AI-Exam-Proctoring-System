@@ -1,12 +1,10 @@
 import {
-  IconAperture,
   IconCopy,
   IconLayoutDashboard,
   IconLogin,
   IconMoodHappy,
   IconTypography,
   IconUserPlus,
-  IconPlayerPlayFilled,
   IconUserCheck,
   IconChartBar,
   IconEye,

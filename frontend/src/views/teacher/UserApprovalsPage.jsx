@@ -21,8 +21,6 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
-  Card,
-  CardContent,
   Tabs,
   Tab,
   IconButton,
@@ -37,8 +35,10 @@ import DashboardCard from '../../components/shared/DashboardCard';
 import axiosInstance from '../../axios';
 import { useGetExamsQuery } from '../../slices/examApiSlice';
 import { toast } from 'react-toastify';
+import { useSearchParams } from 'react-router-dom';
 
 const UserApprovalsPage = () => {
+  const [searchParams] = useSearchParams();
   const { data: exams, isLoading: examsLoading } = useGetExamsQuery();
 
   const [selectedExamId, setSelectedExamId] = useState('');
@@ -53,13 +53,58 @@ const UserApprovalsPage = () => {
   const [tabValue, setTabValue] = useState(0);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [loadingPending, setLoadingPending] = useState(false);
+  const [highlightedRequestId, setHighlightedRequestId] = useState(null);
+  const [hasNotifiedMissing, setHasNotifiedMissing] = useState(false);
+
+  // Sync route query parameters (e.g. from notification click: ?tab=pending&examCode=...&requestId=...)
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    const examParam = searchParams.get('examCode') || searchParams.get('examId');
+    const reqParam = searchParams.get('requestId') || searchParams.get('studentId');
+
+    if (tabParam === 'pending' || tabParam === '2') {
+      setTabValue(2);
+    }
+    if (examParam) {
+      setSelectedExamId(examParam);
+    }
+    if (reqParam) {
+      setHighlightedRequestId(String(reqParam));
+    }
+  }, [searchParams]);
+
+  // When pending requests load, highlight and scroll into view or notify if already handled
+  useEffect(() => {
+    if (highlightedRequestId && !loadingPending && pendingRequests.length > 0) {
+      const match = pendingRequests.find(
+        (r) =>
+          String(r.id) === String(highlightedRequestId) ||
+          String(r._id) === String(highlightedRequestId) ||
+          String(r.studentId) === String(highlightedRequestId) ||
+          String(r.enrollmentId) === String(highlightedRequestId)
+      );
+
+      if (match) {
+        setTimeout(() => {
+          const el = document.getElementById(`pending-row-${match.id || match.studentId}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 150);
+      } else if (!hasNotifiedMissing) {
+        toast.info('This enrollment request has already been processed or is no longer pending.');
+        setHasNotifiedMissing(true);
+      }
+    }
+  }, [highlightedRequestId, pendingRequests, loadingPending, hasNotifiedMissing]);
 
   // Set default selected exam once exams load
   useEffect(() => {
     if (exams && exams.length > 0 && !selectedExamId) {
-      setSelectedExamId(exams[0].examId);
+      const examParam = searchParams.get('examCode') || searchParams.get('examId');
+      setSelectedExamId(examParam || exams[0].examId);
     }
-  }, [exams, selectedExamId]);
+  }, [exams, selectedExamId, searchParams]);
 
   // Fetch all registered students
   const fetchAllStudents = async () => {
@@ -189,7 +234,7 @@ const UserApprovalsPage = () => {
   const handleEnrollStudent = async (student) => {
     try {
       setActionLoading(true);
-      const res = await axiosInstance.post(`/api/users/exam/${selectedExamId}/enroll-student`, {
+      await axiosInstance.post(`/api/users/exam/${selectedExamId}/enroll-student`, {
         studentId: student.id || student._id,
         email: student.email,
       });
@@ -490,8 +535,25 @@ const UserApprovalsPage = () => {
                   <TableBody>
                     {pendingRequests
                       .filter((r) => r.status === 'PENDING')
-                      .map((req) => (
-                        <TableRow key={req.id || req.studentId} hover>
+                      .map((req) => {
+                        const isHighlighted =
+                          highlightedRequestId &&
+                          (String(req.id) === String(highlightedRequestId) ||
+                           String(req._id) === String(highlightedRequestId) ||
+                           String(req.studentId) === String(highlightedRequestId) ||
+                           String(req.enrollmentId) === String(highlightedRequestId));
+
+                        return (
+                          <TableRow
+                            key={req.id || req.studentId}
+                            id={`pending-row-${req.id || req.studentId}`}
+                            hover
+                            sx={{
+                              backgroundColor: isHighlighted ? '#fef3c7' : 'inherit',
+                              outline: isHighlighted ? '2px solid #f59e0b' : 'none',
+                              transition: 'all 0.4s ease',
+                            }}
+                          >
                           <TableCell>
                             <Stack direction="row" spacing={1.5} alignItems="center">
                               <Avatar sx={{ bgcolor: 'warning.light', color: 'warning.main', width: 32, height: 32 }}>
@@ -538,7 +600,8 @@ const UserApprovalsPage = () => {
                             </Stack>
                           </TableCell>
                         </TableRow>
-                      ))}
+                        );
+                      })}
                   </TableBody>
                 </Table>
               )}

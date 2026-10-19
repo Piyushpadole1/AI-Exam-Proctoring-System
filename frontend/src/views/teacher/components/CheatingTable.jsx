@@ -28,7 +28,6 @@ import { useGetExamsQuery } from 'src/slices/examApiSlice';
 import { useGetCheatingLogsQuery } from 'src/slices/cheatingLogApiSlice';
 import CloseIcon from '@mui/icons-material/Close';
 import ImageIcon from '@mui/icons-material/Image';
-import WarningIcon from '@mui/icons-material/Warning';
 
 export default function CheatingTable() {
   const [filter, setFilter] = useState('');
@@ -151,7 +150,7 @@ export default function CheatingTable() {
                 <TableCell><strong>Name</strong></TableCell>
                 <TableCell><strong>Email</strong></TableCell>
                 <TableCell align="center"><strong>Total Violations</strong></TableCell>
-                <TableCell align="center"><strong>Fairness Score</strong></TableCell>
+                <TableCell align="center"><strong>Integrity Score</strong></TableCell>
                 <TableCell align="center"><strong>Cell Phone</strong></TableCell>
                 <TableCell align="center"><strong>No Face</strong></TableCell>
                 <TableCell align="center"><strong>Multiple Faces</strong></TableCell>
@@ -174,7 +173,7 @@ export default function CheatingTable() {
                     (log.cellPhoneCount || 0) +
                     (log.prohibitedObjectCount || 0)
                   );
-                  const fairness = log.fairnessScore ?? Math.max(0, Math.round(((6.0 - Math.min(6, totalV)) / 6.0) * 100));
+                  const integrity = log.integrityScore ?? log.fairnessScore ?? Math.max(0, 100 - (log.cellPhoneCount || 0) * 50 - (log.multipleFaceCount || 0) * 30 - (log.noFaceCount || 0) * 20);
                   return (
                     <TableRow key={index} hover>
                       <TableCell>{index + 1}</TableCell>
@@ -186,16 +185,16 @@ export default function CheatingTable() {
                       <TableCell>{log.email}</TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={`${totalV} / 6`}
-                          color={totalV >= 6 ? 'error' : totalV > 0 ? 'warning' : 'success'}
+                          label={`${totalV}`}
+                          color={totalV >= 5 ? 'error' : totalV > 0 ? 'warning' : 'success'}
                           size="small"
                           sx={{ fontWeight: 'bold' }}
                         />
                       </TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={`${fairness}%`}
-                          color={fairness >= 80 ? 'success' : fairness >= 50 ? 'warning' : 'error'}
+                          label={`${integrity}/100`}
+                          color={integrity >= 70 ? 'success' : integrity >= 30 ? 'warning' : 'error'}
                           size="small"
                           variant="outlined"
                           sx={{ fontWeight: 'bold' }}

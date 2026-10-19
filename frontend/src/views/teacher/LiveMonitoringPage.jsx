@@ -15,8 +15,6 @@ import {
   Card,
   CardContent,
   Grid,
-  Snackbar,
-  Stack,
   Button,
 } from '@mui/material';
 import {
@@ -57,11 +55,86 @@ const LiveMonitoringPage = () => {
   });
 
   const [liveAlert, setLiveAlert] = useState(null);
+  const [realtimeOverrides, setRealtimeOverrides] = useState({});
   const previousViolationsMap = useRef({});
 
-  const activeSessions = sessions || [];
+  // ── SSE Real-Time Push Connection (< 100ms updates) ──
+  useEffect(() => {
+    let eventSource = null;
+    try {
+      eventSource = new EventSource('/api/proctoring/stream', { withCredentials: true });
 
-  // Detect newly triggered violations across polling cycles for instant alerts
+      eventSource.addEventListener('PROCTORING_EVENT', (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          if (!payload) return;
+
+          // 1. Immediately trigger live alert banner (< 100ms)
+          const studentName = payload.studentName || 'Student';
+          const eventName = (payload.eventType || 'Violation').replace(/_/g, ' ');
+          setLiveAlert({
+            message: `🚨 Real-Time Alert: ${studentName} triggered "${eventName}" (Score: ${payload.integrityScore}/100)`,
+            severity: payload.integrityScore <= 30 ? 'error' : 'warning',
+          });
+
+          // 2. Immediately update table state in real-time
+          const sKey = String(payload.sessionId || payload.attemptId || payload.studentEmail || '');
+          setRealtimeOverrides((prev) => ({
+            ...prev,
+            [sKey]: {
+              integrityScore: payload.integrityScore,
+              fairnessScore: payload.integrityScore,
+              totalViolations: payload.totalViolations,
+              classification: payload.classification || payload.verdict,
+              latestViolation: {
+                eventType: payload.eventType,
+                description: payload.description,
+                timestamp: payload.timestamp || new Date().toISOString(),
+                severity: (payload.pointsDeducted || 0) >= 30 ? 'HIGH' : 'MEDIUM',
+              },
+              status: payload.shouldTerminate ? 'terminated' : payload.totalViolations > 0 ? 'flagged' : 'active',
+            },
+          }));
+
+          // Trigger background cache re-sync
+          if (refetch) refetch();
+        } catch (err) {
+          console.warn('[LiveMonitoring] SSE payload parse error:', err);
+        }
+      });
+
+      eventSource.onerror = (err) => {
+        console.warn('[LiveMonitoring] SSE stream reconnection note:', err);
+      };
+    } catch (sseErr) {
+      console.warn('[LiveMonitoring] SSE initialization note:', sseErr);
+    }
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [refetch]);
+
+  const activeSessions = (sessions || []).map((session) => {
+    const sId = String(session._id || session.sessionId || session.attemptId || session.studentEmail || '');
+    const override = realtimeOverrides[sId] || (session.sessionId ? realtimeOverrides[String(session.sessionId)] : null);
+    if (override) {
+      return {
+        ...session,
+        ...override,
+        integrityScore: override.integrityScore,
+        totalViolations: override.totalViolations,
+        classification: override.classification,
+        latestViolation: override.latestViolation,
+        status: override.status || session.status,
+      };
+    }
+    return session;
+  });
+
+  // Detect newly triggered violations across polling cycles for fallback alerts
   useEffect(() => {
     if (!activeSessions || activeSessions.length === 0) return;
 
@@ -71,7 +144,6 @@ const LiveMonitoringPage = () => {
       const currentCount = session.totalViolations || 0;
 
       if (prevCount !== undefined && currentCount > prevCount) {
-        // Trigger live alert
         const studentName = session.studentId?.name || session.studentName || 'Student';
         const eventName = session.latestViolation?.eventType?.replace(/_/g, ' ') || 'Malpractice Violation';
         setLiveAlert({
@@ -203,7 +275,7 @@ const LiveMonitoringPage = () => {
                     <TableCell align="center"><strong>Status</strong></TableCell>
                     <TableCell align="center"><strong>Time Left</strong></TableCell>
                     <TableCell align="center"><strong>Violations</strong></TableCell>
-                    <TableCell align="center"><strong>Fairness Score</strong></TableCell>
+                    <TableCell align="center"><strong>Integrity Score</strong></TableCell>
                     <TableCell align="center"><strong>Classification</strong></TableCell>
                     <TableCell align="center"><strong>Latest Event</strong></TableCell>
                   </TableRow>
@@ -249,9 +321,9 @@ const LiveMonitoringPage = () => {
                       </TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={`${session.totalViolations || 0} / 6`}
+                          label={`${session.totalViolations || 0}`}
                           color={
-                            session.totalViolations >= 6
+                            session.totalViolations >= 5
                               ? 'error'
                               : session.totalViolations > 0
                               ? 'warning'
@@ -262,18 +334,23 @@ const LiveMonitoringPage = () => {
                         />
                       </TableCell>
                       <TableCell align="center">
-                        <Typography
-                          fontWeight="bold"
-                          color={
-                            session.fairnessScore >= 70
-                              ? 'success.main'
-                              : session.fairnessScore >= 40
-                              ? 'warning.main'
-                              : 'error.main'
-                          }
-                        >
-                          {session.fairnessScore}/100
-                        </Typography>
+                        {(() => {
+                          const iScore = session.integrityScore ?? session.fairnessScore ?? 100;
+                          return (
+                            <Typography
+                              fontWeight="bold"
+                              color={
+                                iScore >= 70
+                                  ? 'success.main'
+                                  : iScore >= 40
+                                  ? 'warning.main'
+                                  : 'error.main'
+                              }
+                            >
+                              {iScore}/100
+                            </Typography>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell align="center">
                         <Chip

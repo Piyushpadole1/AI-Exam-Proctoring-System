@@ -4,13 +4,24 @@ import PageContainer from 'src/components/container/PageContainer';
 import ExamForm from './components/ExamForm';
 import { useFormik } from 'formik';
 import * as yup from 'yup';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 import { useCreateExamMutation } from '../../slices/examApiSlice.js';
 import axiosInstance from '../../axios';
 
 const examValidationSchema = yup.object({
   examName: yup.string().required('Exam Name is required'),
+  totalMarks: yup
+    .number()
+    .typeError('Total Marks must be a number')
+    .positive('Total Marks must be positive')
+    .required('Total Marks is required'),
+  passingMarks: yup
+    .number()
+    .typeError('Passing Marks must be a number')
+    .positive('Passing Marks must be positive')
+    .max(yup.ref('totalMarks'), 'Passing Marks cannot exceed Total Marks')
+    .required('Passing Marks is required'),
   totalQuestions: yup
     .number()
     .typeError('Total Number of Questions must be a number')
@@ -39,14 +50,15 @@ const examValidationSchema = yup.object({
 
 const CreateExamPage = () => {
   const { userInfo } = useSelector((state) => state.auth);
-  const [createExam, { isLoading }] = useCreateExamMutation();
+  const [createExam] = useCreateExamMutation();
 
   const initialExamValues = {
     examName: '',
     examId: '',
     examPassword: '',
     subject: '',
-    passingMarks: '40',
+    totalMarks: 100,
+    passingMarks: 40,
     totalQuestions: '',
     duration: '30',
     liveDate: '',
@@ -70,6 +82,8 @@ const CreateExamPage = () => {
     try {
       const examPayload = {
         ...values,
+        totalMarks: Number(values.totalMarks || 100),
+        passingMarks: Number(values.passingMarks || 40),
         hasCodingRound: Boolean(values.hasCodingRound),
         codingMarks: values.hasCodingRound ? Number(values.codingQuestion?.marks || 20) : 0,
         userId: userInfo?._id || userInfo?.id,

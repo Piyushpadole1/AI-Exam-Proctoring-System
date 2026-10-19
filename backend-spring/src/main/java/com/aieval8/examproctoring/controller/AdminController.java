@@ -561,11 +561,13 @@ public class AdminController {
 
             double integrity = attempt.getIntegrityScore() != null ? attempt.getIntegrityScore() : 100.0;
             item.put("fairnessScore", Math.round(integrity));
+            item.put("integrityScore", Math.round(integrity));
 
             String classification = "SAFE";
             if (integrity < 60) classification = "MALPRACTICE";
             else if (integrity < 80) classification = "WARNING";
             item.put("classification", classification);
+            item.put("verdict", classification);
 
             if (latestEv != null) {
                 Map<String, Object> latestMap = new HashMap<>();
@@ -796,7 +798,10 @@ public class AdminController {
             map.put("timestamp", ev.getTimestamp().toString());
             map.put("eventType", ev.getEventType());
             map.put("severity", ev.getSeverity().name());
-            map.put("penaltyPoints", ev.getPenaltyPoints());
+            map.put("penaltyPoints", ev.getPointsDeducted() != null ? ev.getPointsDeducted() : ev.getPenaltyPoints());
+            map.put("pointsDeducted", ev.getPointsDeducted() != null ? ev.getPointsDeducted() : ev.getPenaltyPoints());
+            map.put("integrityScoreAfter", ev.getIntegrityScoreAfter() != null ? ev.getIntegrityScoreAfter() : 100.0);
+            map.put("warningNumber", ev.getWarningNumber());
             map.put("description", ev.getDescription());
             map.put("evidenceUrl", ev.getEvidenceUrl());
             map.put("confidence", ev.getConfidence());

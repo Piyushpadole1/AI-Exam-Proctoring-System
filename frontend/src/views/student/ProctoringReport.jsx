@@ -17,14 +17,11 @@ import {
   Chip,
   Alert,
   LinearProgress,
-  Divider,
 } from '@mui/material';
 import {
   CheckCircle as SafeIcon,
   Warning as WarningIcon,
   Error as DangerIcon,
-  Security as SecurityIcon,
-  Schedule as TimeIcon,
 } from '@mui/icons-material';
 import PageContainer from 'src/components/container/PageContainer';
 import DashboardCard from '../../components/shared/DashboardCard';
@@ -120,14 +117,14 @@ const ProctoringReport = () => {
             <Card>
               <CardContent>
                 <Typography variant="subtitle2" color="textSecondary">
-                  Fairness Score
+                  Integrity Score
                 </Typography>
                 <Typography variant="h3" fontWeight="bold" color={`${classColor}.main`}>
-                  {proctoring.fairnessScore}/100
+                  {proctoring.integrityScore ?? proctoring.fairnessScore ?? 100}/100
                 </Typography>
                 <LinearProgress
                   variant="determinate"
-                  value={proctoring.fairnessScore}
+                  value={proctoring.integrityScore ?? proctoring.fairnessScore ?? 100}
                   color={classColor}
                   sx={{ height: 6, borderRadius: 3, mt: 1 }}
                 />

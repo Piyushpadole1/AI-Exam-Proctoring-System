@@ -23,13 +23,11 @@ import {
   Warning as WarningIcon,
   CheckCircle as SafeIcon,
   Error as DangerIcon,
-  TrendingUp as TrendIcon,
   Visibility as ActiveIcon,
   School as EnrolledIcon,
   FactCheck as SubmissionIcon,
   Assessment as ScoreIcon,
   Percent as PassRateIcon,
-  Flag as FlagIcon,
 } from '@mui/icons-material';
 import PageContainer from 'src/components/container/PageContainer';
 import DashboardCard from '../../components/shared/DashboardCard';
@@ -177,8 +175,8 @@ const AdminDashboard = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <StatCard
-              title="Avg Fairness Score"
-              value={`${stats.avgFairnessScore ?? stats.averageIntegrity ?? 100}%`}
+              title="Avg Integrity Score"
+              value={`${stats.avgIntegrityScore ?? stats.avgFairnessScore ?? stats.averageIntegrity ?? 100}%`}
               icon={<SecurityIcon sx={{ color: 'warning.main' }} />}
               color="warning"
             />
@@ -266,7 +264,7 @@ const AdminDashboard = () => {
                   <TableCell>Student</TableCell>
                   <TableCell>Exam ID</TableCell>
                   <TableCell>Status</TableCell>
-                  <TableCell>Fairness</TableCell>
+                  <TableCell>Integrity Score</TableCell>
                   <TableCell>Violations</TableCell>
                   <TableCell>Classification</TableCell>
                   <TableCell>Date</TableCell>
@@ -299,7 +297,7 @@ const AdminDashboard = () => {
                           size="small"
                         />
                       </TableCell>
-                      <TableCell>{session.fairnessScore}/100</TableCell>
+                      <TableCell>{session.integrityScore ?? session.fairnessScore}/100</TableCell>
                       <TableCell>{session.totalViolations}</TableCell>
                       <TableCell>{getClassificationChip(session.classification)}</TableCell>
                       <TableCell>

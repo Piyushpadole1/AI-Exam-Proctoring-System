@@ -11,7 +11,6 @@ import {
   Select,
   MenuItem,
   FormControl,
-  InputLabel,
   CircularProgress,
   TextField,
   Collapse,
@@ -36,13 +35,12 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ShieldIcon from '@mui/icons-material/Shield';
-import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 import { useNavigate, useParams } from 'react-router';
-import { useCheatingLog } from 'src/context/CheatingLogContext';
 import AudioMonitor from './Components/AudioMonitor';
+import { playSiren, unlockAudio } from '../../utils/siren';
+import PROCTORING_CONFIG from '../../config/proctoring';
 
 const STARTER_TEMPLATES = {
   javascript: `// JavaScript (Node.js) - Write your code from scratch
@@ -78,8 +76,6 @@ int main() {
 export default function Coder() {
   const { examId } = useParams();
   const navigate = useNavigate();
-  const { userInfo } = useSelector((state) => state.auth);
-  const { cheatingLog, updateCheatingLog } = useCheatingLog();
 
   const [exam, setExam] = useState(null);
   const [question, setQuestion] = useState(null);
@@ -99,13 +95,23 @@ export default function Coder() {
   const [consoleOutput, setConsoleOutput] = useState('');
   const [activeConsoleTab, setActiveConsoleTab] = useState(0);
 
-  // Proctoring States
-  const [violationsCount, setViolationsCount] = useState(0);
+  // Proctoring States (100-Point Integrity Model)
+  const [integrityScore, setIntegrityScore] = useState(100);
+  const [headGazeCount, setHeadGazeCount] = useState(0);
+  const [fullscreenExits, setFullscreenExits] = useState(0);
+  const [totalViolations, setTotalViolations] = useState(0);
   const [isDisqualified, setIsDisqualified] = useState(false);
   const [disqualifyDialogOpen, setDisqualifyDialogOpen] = useState(false);
+  const [fullscreenPromptOpen, setFullscreenPromptOpen] = useState(false);
+  const [terminationReason, setTerminationReason] = useState('');
   const [sessionId, setSessionId] = useState(null);
   const lastViolationTime = useRef({});
   const webcamRef = useRef(null);
+
+  // Unlock AudioContext for Siren on user/mount
+  useEffect(() => {
+    unlockAudio();
+  }, []);
 
   // Timer & Code Tracking State
   const [timeLeft, setTimeLeft] = useState(null);
@@ -180,7 +186,7 @@ export default function Coder() {
     fetchSessionId();
   }, [examId]);
 
-  // Log Violation Handler with Cooldown and 6-Violation Auto-Disqualification
+  // Log Violation Handler with 100-Point Deductions, Cooldown, Siren, and Auto-Disqualification
   const logProctoringViolation = useCallback(
     async (eventType, description, evidenceUrl = null) => {
       const now = Date.now();
@@ -188,32 +194,108 @@ export default function Coder() {
       if (now - last < 4000) return; // 4s cooldown per type
       lastViolationTime.current[eventType] = now;
 
-      const newCount = violationsCount + 1;
-      setViolationsCount(newCount);
+      // Play Siren Alert
+      playSiren();
 
-      toast.warn(`Proctoring Warning: ${description} (Violation ${newCount}/6)`);
+      const isHeadGaze = eventType.includes('HEAD') || eventType.includes('GAZE');
+      const isFullscreen =
+        eventType.includes('FULLSCREEN') ||
+        eventType.includes('TAB_SWITCH') ||
+        eventType.includes('WINDOW_BLUR');
+
+      let nextHeadGaze = headGazeCount;
+      if (isHeadGaze) {
+        nextHeadGaze = headGazeCount + 1;
+        setHeadGazeCount(nextHeadGaze);
+      }
+
+      let nextFullscreen = fullscreenExits;
+      if (isFullscreen) {
+        nextFullscreen = fullscreenExits + 1;
+        setFullscreenExits(nextFullscreen);
+        if (nextFullscreen === 1) {
+          setFullscreenPromptOpen(true);
+        }
+      }
+
+      // Calculate deduction according to 100-point model
+      let deduction = 0;
+      if (eventType.includes('CELL') || eventType.includes('PHONE') || eventType.includes('LAPTOP')) {
+        deduction = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.MOBILE_PHONE || 50;
+      } else if (eventType.includes('MULTIPLE')) {
+        deduction = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.MULTIPLE_FACES || 30;
+      } else if (eventType.includes('NO_FACE') || eventType.includes('NOT_VISIBLE')) {
+        deduction = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.NO_PERSON || 20;
+      } else if (isHeadGaze) {
+        if (nextHeadGaze > (PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.HEAD_GAZE_FREE_WARNINGS || 10)) {
+          deduction = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.HEAD_GAZE_PENALTY_POINTS || 5;
+        }
+      }
+
+      const tentativeScore = Math.max(0, integrityScore - deduction);
+      setIntegrityScore(tentativeScore);
+      setTotalViolations((p) => p + 1);
+
+      // Warning Feedback Toast
+      let toastMsg = '';
+      if (isHeadGaze) {
+        toastMsg = nextHeadGaze <= 10
+          ? `⚠️ Warning ${nextHeadGaze} of 10: Head movement / eye gaze looking away`
+          : `⚠️ Warning ${nextHeadGaze}: Head/eye movement detected (5 points deducted)`;
+      } else if (isFullscreen) {
+        toastMsg = nextFullscreen === 1
+          ? '⚠️ Fullscreen Exit Warning (1 of 2): Return to fullscreen immediately!'
+          : '🚨 Exam Disqualified: Fullscreen exit limit exceeded (2/2)!';
+      } else if (deduction > 0) {
+        toastMsg = `⚠️ ${description || eventType} (-${deduction} points deducted)`;
+      } else {
+        toastMsg = `⚠️ Warning: ${description || eventType}`;
+      }
+      toast.warn(toastMsg);
 
       // Send to backend
+      let backendScore = tentativeScore;
+      let shouldTerminate = tentativeScore <= 0 || (isFullscreen && nextFullscreen >= 2);
+      let termReason = tentativeScore <= 0 ? 'Integrity score reached 0' : (isFullscreen && nextFullscreen >= 2 ? 'Left fullscreen twice' : '');
+
       try {
-        await axiosInstance.post(
+        const response = await axiosInstance.post(
           '/api/proctoring/events',
           {
             sessionId: sessionId || examId,
             eventType,
             confidence: 1.0,
-            description,
+            description: description || toastMsg,
             evidenceUrl,
             examId,
+            metadata: {
+              warningNumber: isHeadGaze ? nextHeadGaze : null,
+              fullscreenStrike: isFullscreen ? nextFullscreen : null,
+            },
           },
           { withCredentials: true }
         );
+
+        if (response.data) {
+          if (response.data.integrityScore !== undefined) {
+            backendScore = response.data.integrityScore;
+            setIntegrityScore(backendScore);
+          }
+          if (response.data.shouldTerminate || backendScore <= 0) {
+            shouldTerminate = true;
+          }
+          if (response.data.terminationReason) {
+            termReason = response.data.terminationReason;
+          }
+        }
       } catch (err) {
         console.warn('Could not post proctoring event:', err.message);
       }
 
-      // Check 6-violation rule
-      if (newCount >= 6 && !isDisqualified) {
+      // Check Termination
+      if ((shouldTerminate || isDisqualified) && !isDisqualified) {
         setIsDisqualified(true);
+        setTerminationReason(termReason || (backendScore <= 0 ? 'Integrity score reached 0' : 'Violation threshold exceeded'));
         setDisqualifyDialogOpen(true);
         // Auto-submit current solution
         try {
@@ -221,9 +303,10 @@ export default function Coder() {
             '/api/coding/submit',
             {
               examId,
-              questionId,
-              code,
+              questionId: questionId || (question ? question._id : null),
+              code: codeRef.current || code,
               language,
+              runOnly: false,
             },
             { withCredentials: true }
           );
@@ -232,7 +315,7 @@ export default function Coder() {
         }
       }
     },
-    [violationsCount, isDisqualified, sessionId, examId, questionId, code, language]
+    [integrityScore, headGazeCount, fullscreenExits, isDisqualified, sessionId, examId, questionId, question, code, language]
   );
 
   // Fullscreen and Security Listeners
@@ -521,14 +604,48 @@ export default function Coder() {
             sx={{ fontWeight: 'bold' }}
           />
 
-          {/* Proctoring Status Pill */}
+          {/* Integrity Score Chip */}
           <Chip
             icon={<ShieldIcon />}
-            label={`Violations: ${violationsCount}/6`}
-            color={violationsCount >= 5 ? 'error' : violationsCount > 0 ? 'warning' : 'success'}
+            label={`Integrity: ${integrityScore}/100`}
+            color={integrityScore >= 70 ? 'success' : integrityScore >= 30 ? 'warning' : 'error'}
             size="small"
             sx={{ fontWeight: 'bold' }}
           />
+
+          {/* Head / Eye Warnings Chip */}
+          <Chip
+            label={`Head/Eye: ${headGazeCount}/10`}
+            size="small"
+            sx={{
+              fontWeight: 600,
+              color: '#fff',
+              bgcolor: headGazeCount > 10 ? '#d32f2f' : headGazeCount > 5 ? '#ed6c02' : 'rgba(255,255,255,0.15)',
+            }}
+          />
+
+          {/* Fullscreen Strikes Chip */}
+          <Chip
+            label={`Fullscreen: ${fullscreenExits}/2`}
+            size="small"
+            sx={{
+              fontWeight: 600,
+              color: '#fff',
+              bgcolor: fullscreenExits >= 2 ? '#d32f2f' : fullscreenExits === 1 ? '#ed6c02' : 'rgba(255,255,255,0.15)',
+            }}
+          />
+
+          {totalViolations > 0 && (
+            <Chip
+              label={`Violations: ${totalViolations}`}
+              size="small"
+              sx={{
+                fontWeight: 600,
+                color: '#fff',
+                bgcolor: '#d32f2f',
+              }}
+            />
+          )}
 
           <Tooltip title="Toggle Fullscreen">
             <IconButton
@@ -879,17 +996,51 @@ export default function Coder() {
         </Grid>
       </Grid>
 
-      {/* Disqualification / Termination Dialog (6 Violations) */}
-      <Dialog open={disqualifyDialogOpen} disableEscapeKeyDown>
-        <DialogTitle sx={{ color: 'error.main', fontWeight: 'bold' }}>
-          Exam Terminated: Violation Threshold Exceeded
+      {/* Fullscreen Exit Warning Dialog (Strike 1 of 2) */}
+      <Dialog open={fullscreenPromptOpen} disableEscapeKeyDown>
+        <DialogTitle sx={{ color: 'warning.main', fontWeight: 'bold' }}>
+          ⚠️ Fullscreen Warning (Strike 1 of 2)
         </DialogTitle>
         <DialogContent>
           <Typography variant="body1" gutterBottom>
-            You have accumulated <strong>{violationsCount}</strong> malpractice violations during this proctored exam session.
+            You have left or minimized the fullscreen proctoring window.
+          </Typography>
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            You are granted exactly <strong>1 warning</strong>. Leaving fullscreen a second time will terminate your exam session immediately with 0 remaining integrity points.
+          </Alert>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={async () => {
+              try {
+                if (document.documentElement.requestFullscreen) {
+                  await document.documentElement.requestFullscreen();
+                }
+              } catch (e) {
+                console.warn(e);
+              }
+              setFullscreenPromptOpen(false);
+            }}
+          >
+            Return to Fullscreen Now
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Disqualification / Termination Dialog (100-Point Integrity Enforcement) */}
+      <Dialog open={disqualifyDialogOpen} disableEscapeKeyDown>
+        <DialogTitle sx={{ color: 'error.main', fontWeight: 'bold' }}>
+          Exam Terminated: Integrity Policy Enforced
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" gutterBottom>
+            Reason: <strong>{terminationReason || (integrityScore <= 0 ? 'Integrity score reached 0' : 'Fullscreen exit limit exceeded')}</strong>
           </Typography>
           <Alert severity="error" sx={{ mt: 2 }}>
-            Under institutional proctoring regulations, reaching 6 violations results in immediate session termination. Your work submitted up to this point has been recorded and submitted for teacher review.
+            Final Integrity Score: <strong>{integrityScore} / 100</strong>.<br />
+            Under institutional proctoring regulations, reaching 0 integrity points or repeatedly violating security boundaries results in immediate session termination. Your current code solution was automatically submitted for review.
           </Alert>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>

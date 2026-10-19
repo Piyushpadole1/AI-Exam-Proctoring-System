@@ -33,6 +33,11 @@ public class CheatingLogEntry {
     @Column(name = "screenshots_json", columnDefinition = "LONGTEXT")
     private String screenshotsJson = "[]";
 
+    @Column(name = "fairness_score")
+    private Double fairnessScore = 100.0;
+
+    private String verdict = "SAFE";
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
@@ -120,6 +125,30 @@ public class CheatingLogEntry {
 
     public void setScreenshotsJson(String screenshotsJson) {
         this.screenshotsJson = screenshotsJson;
+    }
+
+    public Double getFairnessScore() {
+        return fairnessScore;
+    }
+
+    public void setFairnessScore(Double fairnessScore) {
+        this.fairnessScore = fairnessScore;
+    }
+
+    public Double getIntegrityScore() {
+        return fairnessScore;
+    }
+
+    public void setIntegrityScore(Double integrityScore) {
+        this.fairnessScore = integrityScore;
+    }
+
+    public String getVerdict() {
+        return verdict;
+    }
+
+    public void setVerdict(String verdict) {
+        this.verdict = verdict;
     }
 
     public LocalDateTime getCreatedAt() {

@@ -6,10 +6,6 @@ import {
   Tabs,
   Tab,
   Stack,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   IconButton,
   InputAdornment,
 } from '@mui/material';
