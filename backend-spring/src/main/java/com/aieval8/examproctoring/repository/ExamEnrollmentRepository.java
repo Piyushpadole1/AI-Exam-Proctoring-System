@@ -20,5 +20,6 @@ public interface ExamEnrollmentRepository extends JpaRepository<ExamEnrollment, 
     void deleteByExamId(Long examId);
     void deleteByExamIdAndStudentId(Long examId, Long studentId);
     List<ExamEnrollment> findByExamTeacherId(Long teacherId);
+    boolean existsByStudentIdAndExamTeacherId(Long studentId, Long teacherId);
     List<ExamEnrollment> findByExamTeacherIdAndStatus(Long teacherId, EnrollmentStatus status);
 }

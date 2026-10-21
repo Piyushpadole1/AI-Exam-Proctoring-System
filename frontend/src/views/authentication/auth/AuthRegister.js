@@ -14,8 +14,10 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import SchoolIcon from '@mui/icons-material/School';
 import PersonIcon from '@mui/icons-material/Person';
 import CustomTextField from '../../../components/forms/theme-elements/CustomTextField';
+import StudentFaceCapture from './StudentFaceCapture';
+import PasswordRequirementsChecklist from '../../../components/forms/PasswordRequirementsChecklist';
 
-const AuthRegister = ({ formik, title, subtitle, subtext }) => {
+const AuthRegister = ({ formik, title, subtitle, subtext, faceData, setFaceData, consentAgreed, setConsentAgreed }) => {
   const { values, errors, touched, handleBlur, handleChange, setFieldValue } = formik;
   const [showPassword, setShowPassword] = React.useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
@@ -151,7 +153,7 @@ const AuthRegister = ({ formik, title, subtitle, subtext }) => {
               name="password"
               type={showPassword ? 'text' : 'password'}
               variant="outlined"
-              placeholder="Minimum 6 characters"
+              placeholder="Min. 8 chars (upper, lower, number, special)"
               value={values.password}
               onChange={handleChange}
               onBlur={handleBlur}
@@ -174,6 +176,7 @@ const AuthRegister = ({ formik, title, subtitle, subtext }) => {
                 ),
               }}
             />
+            <PasswordRequirementsChecklist password={values.password} showAlways={Boolean(values.password && values.password.length > 0)} />
           </Box>
 
           {/* Confirm Password */}
@@ -211,6 +214,14 @@ const AuthRegister = ({ formik, title, subtitle, subtext }) => {
             />
           </Box>
         </Stack>
+
+        {values.role === 'student' && (
+          <StudentFaceCapture
+            onFaceDataChange={setFaceData}
+            consentAgreed={consentAgreed}
+            setConsentAgreed={setConsentAgreed}
+          />
+        )}
 
         <Button
           color="primary"

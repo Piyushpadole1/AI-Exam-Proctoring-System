@@ -278,16 +278,6 @@ const Header = (props) => {
               sx={{ fontWeight: 'bold' }}
             />
           )}
-          <Button
-            variant="outlined"
-            color="error"
-            size="small"
-            startIcon={<IconLogout size={16} />}
-            onClick={handleQuickLogout}
-            sx={{ textTransform: 'none', fontWeight: 600 }}
-          >
-            Logout
-          </Button>
           <Profile />
         </Stack>
       </ToolbarStyled>

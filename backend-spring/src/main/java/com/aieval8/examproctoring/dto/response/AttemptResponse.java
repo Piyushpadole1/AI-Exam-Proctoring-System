@@ -20,6 +20,8 @@ public class AttemptResponse {
     private Double percentage;
     private Boolean passed;
     private Double integrityScore;
+    private String terminationReason;
+    private String failReason;
 
     public AttemptResponse() {
     }
@@ -41,6 +43,8 @@ public class AttemptResponse {
         this.percentage = attempt.getPercentage();
         this.passed = attempt.getPassed();
         this.integrityScore = attempt.getIntegrityScore();
+        this.terminationReason = attempt.getTerminationReason();
+        this.failReason = attempt.getFailReason();
     }
 
     public Long getAttemptId() {
@@ -153,5 +157,21 @@ public class AttemptResponse {
 
     public void setIntegrityScore(Double integrityScore) {
         this.integrityScore = integrityScore;
+    }
+
+    public String getTerminationReason() {
+        return terminationReason;
+    }
+
+    public void setTerminationReason(String terminationReason) {
+        this.terminationReason = terminationReason;
+    }
+
+    public String getFailReason() {
+        return failReason;
+    }
+
+    public void setFailReason(String failReason) {
+        this.failReason = failReason;
     }
 }

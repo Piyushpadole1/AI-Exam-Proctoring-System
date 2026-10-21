@@ -71,8 +71,21 @@ public class ProctoringStreamService {
         }
     }
 
+    private final List<java.util.function.Consumer<Map<String, Object>>> telemetryListeners = new CopyOnWriteArrayList<>();
+
+    public void addTelemetryListener(java.util.function.Consumer<Map<String, Object>> listener) {
+        telemetryListeners.add(listener);
+    }
+
     public void broadcastTelemetry(Long teacherId, String examCode, Map<String, Object> payload) {
-        // Dispatch to teacher subscribers
+        // Dispatch to WebSocket / external listeners
+        for (java.util.function.Consumer<Map<String, Object>> listener : telemetryListeners) {
+            try {
+                listener.accept(payload);
+            } catch (Exception ignored) {}
+        }
+
+        // Dispatch to teacher SSE subscribers
         if (teacherId != null) {
             List<SseEmitter> list = teacherEmitters.get(teacherId);
             if (list != null && !list.isEmpty()) {
@@ -86,7 +99,7 @@ public class ProctoringStreamService {
             }
         }
 
-        // Dispatch to exam subscribers
+        // Dispatch to exam SSE subscribers
         if (examCode != null) {
             List<SseEmitter> list = examEmitters.get(examCode);
             if (list != null && !list.isEmpty()) {

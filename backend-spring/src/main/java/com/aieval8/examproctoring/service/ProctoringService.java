@@ -1,5 +1,6 @@
 package com.aieval8.examproctoring.service;
 
+import com.aieval8.examproctoring.config.ProctoringConstants;
 import com.aieval8.examproctoring.dto.request.ViolationEventRequest;
 import com.aieval8.examproctoring.dto.response.ViolationResponse;
 import com.aieval8.examproctoring.entity.*;
@@ -76,7 +77,7 @@ public class ProctoringService {
         ExamAttempt attempt = session.getAttempt();
 
         // Security check: verify this attempt belongs to the authenticated student
-        if (!attempt.getStudent().getId().equals(studentDetails.getId())) {
+        if (studentDetails != null && !attempt.getStudent().getId().equals(studentDetails.getId())) {
             throw new AccessDeniedException("Access denied: You do not own this proctoring session.");
         }
 
@@ -118,9 +119,23 @@ public class ProctoringService {
         boolean shouldTerminate = false;
         String terminationReason = null;
 
+        boolean isFaceMismatch = eventType != null && (eventType.toUpperCase().contains("MISMATCH") || eventType.toUpperCase().contains("UNAUTHORIZED"));
+        int consecutiveMismatches = session.getConsecutiveFaceMismatches();
+        if (isFaceMismatch) {
+            consecutiveMismatches++;
+            session.setConsecutiveFaceMismatches(consecutiveMismatches);
+            session.setTotalFaceMismatches(session.getTotalFaceMismatches() + 1);
+            session.setFaceVerificationStatus("MISMATCH");
+            attempt.setFaceVerificationStatus("MISMATCH");
+            attempt.setFaceMismatchCount(consecutiveMismatches);
+        }
+
         if (scoringEngine.isFullscreenOrBlur(eventType) && fullscreenCount >= 2) {
             shouldTerminate = true;
             terminationReason = "Left fullscreen twice";
+        } else if (isFaceMismatch && consecutiveMismatches >= ProctoringConstants.MAX_CONSECUTIVE_FACE_MISMATCHES) {
+            shouldTerminate = true;
+            terminationReason = "Face verification failed 3 consecutive times";
         } else if (newIntegrityScore <= 0.0) {
             shouldTerminate = true;
             terminationReason = "Integrity score reached 0";
@@ -132,10 +147,11 @@ public class ProctoringService {
         if (shouldTerminate) {
             message = "Exam Terminated: " + terminationReason;
         } else if (scoringEngine.isHeadOrGaze(eventType)) {
-            if (warningNumber != null && warningNumber <= 10) {
-                message = "Warning " + warningNumber + " of 10: " + (request.getDescription() != null ? request.getDescription() : "Head/Eye gaze movement detected");
+            int freeLimit = ProctoringConstants.HEAD_GAZE_FREE_WARNINGS;
+            if (warningNumber != null && warningNumber <= freeLimit) {
+                message = "Warning " + warningNumber + " of " + freeLimit + ": " + (request.getDescription() != null ? request.getDescription() : "Head/Eye gaze looking away");
             } else {
-                message = "Warning " + warningNumber + ": " + (request.getDescription() != null ? request.getDescription() : "Head/Eye gaze movement detected") + " (" + pointsDeducted + " points deducted)";
+                message = "Warning " + warningNumber + ": " + (request.getDescription() != null ? request.getDescription() : "Head/Eye gaze looking away") + " (" + pointsDeducted + " points deducted)";
             }
         } else if (scoringEngine.isFullscreenOrBlur(eventType)) {
             message = "Warning 1 of 1: Fullscreen exit detected! You must remain in fullscreen mode during the exam. Next exit will result in immediate termination.";
@@ -176,6 +192,8 @@ public class ProctoringService {
         if (shouldTerminate) {
             attempt.setStatus(AttemptStatus.DISQUALIFIED);
             attempt.setTerminationReason(terminationReason);
+            attempt.setPassed(false);
+            attempt.setFailReason("Failed: exam terminated due to violations.");
             attempt.setSubmittedAt(LocalDateTime.now());
             session.setEndedAt(LocalDateTime.now());
             sessionRepository.save(session);
@@ -225,50 +243,57 @@ public class ProctoringService {
             // Non-critical: do not fail proctoring transaction on broadcast error
         }
 
-        // Sync to cheating_logs table for teacher panel visibility
+        // Sync to cheating_logs table for teacher panel visibility asynchronously (non-blocking)
         if (attempt.getExam() != null && attempt.getStudent() != null) {
-            try {
-                String examCode = attempt.getExam().getExamCode();
-                String studentEmail = attempt.getStudent().getEmail();
-                String studentName = attempt.getStudent().getName();
+            final String examCode = attempt.getExam().getExamCode();
+            final String studentEmail = attempt.getStudent().getEmail();
+            final String studentName = attempt.getStudent().getName();
+            final String evUrl = request.getEvidenceUrl();
+            final double finalIntegrityScore = newIntegrityScore;
+            final String finalClassification = classification;
 
-                CheatingLogEntry cle = cheatingLogRepository.findFirstByExamIdAndEmail(examCode, studentEmail)
-                        .orElseGet(() -> new CheatingLogEntry(examCode, studentName, studentEmail, 0, 0, 0, 0, "[]"));
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    CheatingLogEntry cle = cheatingLogRepository.findFirstByExamIdAndEmail(examCode, studentEmail)
+                            .orElseGet(() -> new CheatingLogEntry(examCode, studentName, studentEmail, 0, 0, 0, 0, "[]"));
 
-                String uType = eventType.toUpperCase();
-                if (uType.contains("NO_FACE") || uType.contains("NOT_VISIBLE")) {
-                    cle.setNoFaceCount((cle.getNoFaceCount() == null ? 0 : cle.getNoFaceCount()) + 1);
-                } else if (uType.contains("MULTIPLE")) {
-                    cle.setMultipleFaceCount((cle.getMultipleFaceCount() == null ? 0 : cle.getMultipleFaceCount()) + 1);
-                } else if (uType.contains("CELL") || uType.contains("PHONE")) {
-                    cle.setCellPhoneCount((cle.getCellPhoneCount() == null ? 0 : cle.getCellPhoneCount()) + 1);
-                } else if (scoringEngine.isAudio(eventType) || scoringEngine.isHeadOrGaze(eventType) || scoringEngine.isFullscreenOrBlur(eventType)) {
-                    // Audio, gaze, and fullscreen exits are tracked individually in proctoring_events
-                } else {
-                    cle.setProhibitedObjectCount((cle.getProhibitedObjectCount() == null ? 0 : cle.getProhibitedObjectCount()) + 1);
-                }
-
-                cle.setFairnessScore(newIntegrityScore);
-                cle.setVerdict(classification);
-
-                if (request.getEvidenceUrl() != null && !request.getEvidenceUrl().isEmpty()) {
-                    List<java.util.Map<String, Object>> screens = new java.util.ArrayList<>();
-                    if (cle.getScreenshotsJson() != null && !cle.getScreenshotsJson().isEmpty()) {
-                        try {
-                            screens = new java.util.ArrayList<>(objectMapper.readValue(cle.getScreenshotsJson(), List.class));
-                        } catch (Exception ignored) {}
+                    String uType = eventType.toUpperCase();
+                    if (uType.contains("MISMATCH") || uType.contains("UNAUTHORIZED")) {
+                        cle.setFaceMismatchCount((cle.getFaceMismatchCount() == null ? 0 : cle.getFaceMismatchCount()) + 1);
+                    } else if (uType.contains("NO_FACE") || uType.contains("NOT_VISIBLE")) {
+                        cle.setNoFaceCount((cle.getNoFaceCount() == null ? 0 : cle.getNoFaceCount()) + 1);
+                    } else if (uType.contains("MULTIPLE")) {
+                        cle.setMultipleFaceCount((cle.getMultipleFaceCount() == null ? 0 : cle.getMultipleFaceCount()) + 1);
+                    } else if (uType.contains("CELL") || uType.contains("PHONE")) {
+                        cle.setCellPhoneCount((cle.getCellPhoneCount() == null ? 0 : cle.getCellPhoneCount()) + 1);
+                    } else if (scoringEngine.isAudio(eventType) || scoringEngine.isHeadOrGaze(eventType) || scoringEngine.isFullscreenOrBlur(eventType)) {
+                        // Audio, gaze, and fullscreen exits are tracked individually in proctoring_events
+                    } else {
+                        cle.setProhibitedObjectCount((cle.getProhibitedObjectCount() == null ? 0 : cle.getProhibitedObjectCount()) + 1);
                     }
-                    java.util.Map<String, Object> screen = new java.util.HashMap<>();
-                    screen.put("url", request.getEvidenceUrl());
-                    screen.put("type", eventType);
-                    screen.put("detectedAt", LocalDateTime.now().toString());
-                    screens.add(screen);
-                    cle.setScreenshotsJson(objectMapper.writeValueAsString(screens));
+
+                    cle.setFairnessScore(finalIntegrityScore);
+                    cle.setVerdict(finalClassification);
+
+                    if (evUrl != null && !evUrl.isEmpty()) {
+                        List<java.util.Map<String, Object>> screens = new java.util.ArrayList<>();
+                        if (cle.getScreenshotsJson() != null && !cle.getScreenshotsJson().isEmpty()) {
+                            try {
+                                screens = new java.util.ArrayList<>(objectMapper.readValue(cle.getScreenshotsJson(), List.class));
+                            } catch (Exception ignored) {}
+                        }
+                        java.util.Map<String, Object> screen = new java.util.HashMap<>();
+                        screen.put("url", evUrl);
+                        screen.put("type", eventType);
+                        screen.put("detectedAt", LocalDateTime.now().toString());
+                        screens.add(screen);
+                        cle.setScreenshotsJson(objectMapper.writeValueAsString(screens));
+                    }
+                    cheatingLogRepository.save(cle);
+                } catch (Exception ignored) {
+                    // Non-critical async persistence
                 }
-                cheatingLogRepository.save(cle);
-            } catch (Exception logEx) {
-                // Ignore sync failures to avoid failing proctoring event
-            }
+            });
         }
 
         return new ViolationResponse(
@@ -312,29 +337,35 @@ public class ProctoringService {
             });
         }
 
-        // 2. Add screenshot to cheating_logs
+        // 2. Add screenshot to cheating_logs asynchronously (non-blocking)
         try {
             ExamAttempt attempt = session.getAttempt();
-            String examCode = attempt.getExam() != null ? attempt.getExam().getExamCode() : "";
-            String studentEmail = attempt.getStudent().getEmail();
-            String studentName = attempt.getStudent().getName();
+            final String examCode = attempt.getExam() != null ? attempt.getExam().getExamCode() : "";
+            final String studentEmail = attempt.getStudent().getEmail();
+            final String studentName = attempt.getStudent().getName();
+            final String evUrl = evidenceUrl;
+            final String vId = violationId;
 
-            CheatingLogEntry cle = cheatingLogRepository.findFirstByExamIdAndEmail(examCode, studentEmail)
-                    .orElseGet(() -> new CheatingLogEntry(examCode, studentName, studentEmail, 0, 0, 0, 0, "[]"));
-
-            List<Map<String, Object>> screens = new ArrayList<>();
-            if (cle.getScreenshotsJson() != null && !cle.getScreenshotsJson().isEmpty()) {
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
                 try {
-                    screens = new ArrayList<>(objectMapper.readValue(cle.getScreenshotsJson(), List.class));
+                    CheatingLogEntry cle = cheatingLogRepository.findFirstByExamIdAndEmail(examCode, studentEmail)
+                            .orElseGet(() -> new CheatingLogEntry(examCode, studentName, studentEmail, 0, 0, 0, 0, "[]"));
+
+                    List<Map<String, Object>> screens = new ArrayList<>();
+                    if (cle.getScreenshotsJson() != null && !cle.getScreenshotsJson().isEmpty()) {
+                        try {
+                            screens = new ArrayList<>(objectMapper.readValue(cle.getScreenshotsJson(), List.class));
+                        } catch (Exception ignored) {}
+                    }
+                    Map<String, Object> screen = new HashMap<>();
+                    screen.put("url", evUrl);
+                    screen.put("violationId", vId);
+                    screen.put("detectedAt", LocalDateTime.now().toString());
+                    screens.add(screen);
+                    cle.setScreenshotsJson(objectMapper.writeValueAsString(screens));
+                    cheatingLogRepository.save(cle);
                 } catch (Exception ignored) {}
-            }
-            Map<String, Object> screen = new HashMap<>();
-            screen.put("url", evidenceUrl);
-            screen.put("violationId", violationId);
-            screen.put("detectedAt", LocalDateTime.now().toString());
-            screens.add(screen);
-            cle.setScreenshotsJson(objectMapper.writeValueAsString(screens));
-            cheatingLogRepository.save(cle);
+            });
         } catch (Exception ignored) {}
 
         return new ViolationResponse(true, session.getIntegrityScore(), session.getVerdict(), false, "Evidence attached successfully.");

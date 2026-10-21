@@ -2,28 +2,46 @@
 // Configurable constants for Head Movement, Eye Gaze, Audio, and 100-Point Integrity Rules.
 
 const PROCTORING_CONFIG = {
-  // Detection Frame Rate: 5 to 7 checks per second (150ms interval for near-instant detection)
-  CHECK_INTERVAL_MS: 150,
+  // Detection Frame Rate: 8-10 checks per second (~100-120ms interval for immediate detection)
+  CHECK_INTERVAL_MS: 120,
+  OBJECT_CHECK_INTERVAL_MS: 100, // Fast 10 checks per second for mobile phone / secondary laptop
 
   // Initial Calibration Duration: 2 seconds of looking straight at the screen
   CALIBRATION_DURATION_MS: 2000,
 
-  // Sustained Detection Durations (ms) - condition must persist before firing
+  // Downward gaze policy: Allowed for desk, keyboard, notes, writing. Zero warning, zero penalty.
+  ALLOW_DOWNWARD_GAZE: true,
+
+  // Biometric Face Identity Verification Configuration
+  FACE_VERIFICATION: {
+    ENABLED: true,
+    INTERVAL_MS: 12000,                  // Continuous re-check every 12 seconds
+    MATCH_THRESHOLD: 0.58,              // Distance threshold (distance < 0.58 is match, >= 0.58 is mismatch)
+    MAX_CONSECUTIVE_MISMATCHES: 3,       // 3 mismatches in a row terminates exam
+    PRE_EXAM_MAX_RETRY_ATTEMPTS: 3,     // Allowed live verification retries before exam start
+    POINTS_DEDUCTED_PER_MISMATCH: 30,   // Point deduction per face mismatch
+    COOLDOWN_MS: 12000,
+  },
+
+  // Sustained Detection Durations (ms) - condition confirmation before firing look-away/anomalies
   SUSTAINED_DURATIONS: {
-    HEAD_MOVEMENT: 1500,   // Head turn/tilt > 1.5 seconds
-    HEAD_TURNED: 1500,
-    EYE_GAZE: 1500,        // Eyes looking away > 1.5 seconds
-    EYE_GAZE_AWAY: 1500,
-    NO_FACE: 2000,         // No person in frame > 2.0 seconds
-    NO_FACE_DETECTED: 2000,
-    MULTIPLE_FACES: 2000,  // Multiple faces > 2.0 seconds
-    CELL_PHONE: 1800,      // Mobile phone visible > 1.8 seconds
-    CELL_PHONE_DETECTED: 1800,
-    LAPTOP: 1800,          // Secondary laptop visible > 1.8 seconds
-    LAPTOP_DETECTED: 1800,
-    EXTERNAL_VOICE: 1000,  // Sustained speech / external voice > 1 second
-    BACKGROUND_NOISE: 2000,
-    SPEECH_DETECTED: 1000,
+    HEAD_MOVEMENT: 1200,           // Head turn/tilt confirmed in ~1.2 seconds
+    HEAD_TURNED: 1200,
+    EYE_GAZE: 1200,                // Eyes looking away confirmed in ~1.2 seconds
+    EYE_GAZE_AWAY: 1200,
+    PROLONGED_LOOKING_AWAY: 1200,  // Continuous looking away confirmed in ~1.2 seconds
+    DOWNWARD_GAZE_MAX: 0,          // Downward gaze never flags a violation (fully allowed)
+    FACE_MISMATCH: 500,            // Face identity mismatch confirmed in ~500ms
+    NO_FACE: 1000,                 // No person in frame confirmed in 1.0s
+    NO_FACE_DETECTED: 1000,
+    MULTIPLE_FACES: 500,           // Multiple faces confirmed in ~500ms
+    CELL_PHONE: 0,                 // Instant detection on confident frame (1 frame if >=0.50, 2 frames if >=0.38)
+    CELL_PHONE_DETECTED: 0,
+    LAPTOP: 0,                     // Instant detection on confident frame
+    LAPTOP_DETECTED: 0,
+    EXTERNAL_VOICE: 500,           // Sustained speech confirmed in ~500ms
+    BACKGROUND_NOISE: 800,
+    SPEECH_DETECTED: 500,
   },
 
   // Event Cooldowns (ms) - minimum delay before logging another event of the same type
@@ -33,6 +51,9 @@ const PROCTORING_CONFIG = {
     EYE_GAZE: 5000,
     EYE_GAZE_AWAY: 5000,
     GAZE_DEVIATION: 5000,
+    PROLONGED_LOOKING_AWAY: 5000,
+    DOWNWARD_GAZE: 5000,
+    FACE_MISMATCH: 12000,
     CELL_PHONE: 6000,
     CELL_PHONE_DETECTED: 6000,
     LAPTOP: 6000,
@@ -54,22 +75,25 @@ const PROCTORING_CONFIG = {
 
   // Configurable Calibrated Head & Gaze Angle / Ratio Thresholds (relative to baseline)
   THRESHOLDS: {
-    // Yaw (Head turn left/right): deviation from calibrated baseline
-    HEAD_YAW_DEVIATION: 0.15,
+    // Yaw (Head turn left/right): horizontal angle deviation from calibrated baseline
+    HEAD_YAW_DEVIATION: 0.18,
 
-    // Pitch (Head tilt up/down): vertical deviation from calibrated baseline
+    // Pitch (Head tilt up/down): vertical angle deviation from calibrated baseline
     HEAD_PITCH_DEVIATION: 0.14,
 
     // Eye Gaze: horizontal iris position deviation from calibrated baseline
-    EYE_GAZE_HORIZONTAL_DEVIATION: 0.18,
+    EYE_GAZE_HORIZONTAL_DEVIATION: 0.16,
 
-    // Eye Gaze: vertical iris deviation from calibrated baseline
-    EYE_GAZE_VERTICAL_DEVIATION: 0.20,
+    // Eye Gaze: vertical iris deviation from calibrated baseline (looking down at desk/phone)
+    EYE_GAZE_VERTICAL_DEVIATION: 0.16,
+
+    // Tolerance added to yaw when student is looking down (writing/typing at desk)
+    DOWNWARD_YAW_TOLERANCE: 0.05,
 
     // Absolute fallback limits (if calibration is pending)
-    EYE_GAZE_MIN_RATIO: 0.26,
-    EYE_GAZE_MAX_RATIO: 0.74,
-    EYE_GAZE_VERTICAL_TOLERANCE: 0.28,
+    EYE_GAZE_MIN_RATIO: 0.28,
+    EYE_GAZE_MAX_RATIO: 0.72,
+    EYE_GAZE_VERTICAL_TOLERANCE: 0.25,
   },
 
   // 100-Point Integrity Scoring System
@@ -82,16 +106,21 @@ const PROCTORING_CONFIG = {
       CELL_PHONE_DETECTED: 50,
       LAPTOP: 50,
       LAPTOP_DETECTED: 50,
+      FACE_MISMATCH: 30,
+      UNAUTHORIZED_PERSON: 30,
       MULTIPLE_FACES: 30,
       NO_PERSON: 20,
       NO_FACE: 20,
       NO_FACE_DETECTED: 20,
 
-      // Head movement or eye gaze:
+      // Head movement, eye gaze, or prolonged looking-away (left, right, or up):
       // First 10 warnings are free (warning only, no deduction)
       HEAD_GAZE_FREE_WARNINGS: 10,
       // From the 11th onward: 5 points each
       HEAD_GAZE_PENALTY_POINTS: 5,
+
+      // Downward glance (keyboard, desk, writing): 0 points deducted, no warning
+      DOWNWARD_GAZE: 0,
 
       // Audio violations: warning only (0 points deducted)
       EXTERNAL_VOICE: 0,
@@ -130,6 +159,8 @@ const PROCTORING_CONFIG = {
 };
 
 // Backward-compatible lowercase aliases to ensure no property access ever fails
+PROCTORING_CONFIG.faceVerification = PROCTORING_CONFIG.FACE_VERIFICATION;
+PROCTORING_CONFIG.downwardGazeMaxDurationMs = PROCTORING_CONFIG.DOWNWARD_GAZE_MAX_DURATION_MS;
 PROCTORING_CONFIG.cooldowns = PROCTORING_CONFIG.COOLDOWNS;
 PROCTORING_CONFIG.sustainedDurations = PROCTORING_CONFIG.SUSTAINED_DURATIONS;
 PROCTORING_CONFIG.thresholds = PROCTORING_CONFIG.THRESHOLDS;

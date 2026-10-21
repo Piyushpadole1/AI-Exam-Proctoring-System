@@ -31,6 +31,8 @@ const Error = Loadable(lazy(() => import('../views/authentication/Error')));
 const Register = Loadable(lazy(() => import('../views/authentication/Register')));
 const Login = Loadable(lazy(() => import('../views/authentication/Login')));
 const UserAccount = Loadable(lazy(() => import('../views/authentication/UserAccount')));
+const UserProfilePage = Loadable(lazy(() => import('../views/user/UserProfilePage')));
+const UserTasksPage = Loadable(lazy(() => import('../views/user/UserTasksPage')));
 
 // Teacher Routes
 const TeacherExamsPage = Loadable(lazy(() => import('./../views/teacher/TeacherExamsPage')));
@@ -77,6 +79,12 @@ const Router = createBrowserRouter(
           <Route path="/Success" exact={true} element={<Success />} />
           <Route path="/exam" exact={true} element={<ExamPage />} />
           <Route path="/result" exact={true} element={<ResultPage />} />
+          <Route path="/profile" exact={true} element={<UserProfilePage />} />
+          <Route path="/account" exact={true} element={<UserAccount />} />
+          <Route path="/tasks" exact={true} element={<UserTasksPage />} />
+          <Route path="/user/profile" exact={true} element={<UserProfilePage />} />
+          <Route path="/user/account" exact={true} element={<UserAccount />} />
+          <Route path="/user/tasks" exact={true} element={<UserTasksPage />} />
           <Route path="" element={<TeacherRoute />}>
             <Route path="/teacher/exams" exact={true} element={<TeacherExamsPage />} />
             <Route path="/create-exam" exact={true} element={<CreateExamPage />} />

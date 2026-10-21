@@ -14,7 +14,10 @@ public class StudentRegisterRequest {
     private String email;
 
     @NotBlank(message = "Password is required")
-    @Size(min = 6, message = "Password must be at least 6 characters")
+    @jakarta.validation.constraints.Pattern(
+        regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z\\d]).{8,}$",
+        message = "Password must be at least 8 characters long and contain at least one uppercase letter (A-Z), one lowercase letter (a-z), one number (0-9), and one special character."
+    )
     private String password;
 
     private String phone;
@@ -22,6 +25,11 @@ public class StudentRegisterRequest {
     private String clientCode;
 
     private String studentIdNumber; // Roll number / Student ID
+
+    private Boolean faceConsent;
+    private java.util.List<String> faceImages;
+    private java.util.List<java.util.List<Double>> faceEmbeddings;
+    private java.util.List<Double> averageEmbedding;
 
     public StudentRegisterRequest() {
     }
@@ -72,5 +80,37 @@ public class StudentRegisterRequest {
 
     public void setStudentIdNumber(String studentIdNumber) {
         this.studentIdNumber = studentIdNumber;
+    }
+
+    public Boolean getFaceConsent() {
+        return faceConsent;
+    }
+
+    public void setFaceConsent(Boolean faceConsent) {
+        this.faceConsent = faceConsent;
+    }
+
+    public java.util.List<String> getFaceImages() {
+        return faceImages;
+    }
+
+    public void setFaceImages(java.util.List<String> faceImages) {
+        this.faceImages = faceImages;
+    }
+
+    public java.util.List<java.util.List<Double>> getFaceEmbeddings() {
+        return faceEmbeddings;
+    }
+
+    public void setFaceEmbeddings(java.util.List<java.util.List<Double>> faceEmbeddings) {
+        this.faceEmbeddings = faceEmbeddings;
+    }
+
+    public java.util.List<Double> getAverageEmbedding() {
+        return averageEmbedding;
+    }
+
+    public void setAverageEmbedding(java.util.List<Double> averageEmbedding) {
+        this.averageEmbedding = averageEmbedding;
     }
 }

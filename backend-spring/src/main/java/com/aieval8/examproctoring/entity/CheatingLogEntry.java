@@ -24,6 +24,9 @@ public class CheatingLogEntry {
     @Column(name = "multiple_face_count")
     private Integer multipleFaceCount = 0;
 
+    @Column(name = "face_mismatch_count")
+    private Integer faceMismatchCount = 0;
+
     @Column(name = "cell_phone_count")
     private Integer cellPhoneCount = 0;
 
@@ -101,6 +104,14 @@ public class CheatingLogEntry {
 
     public void setMultipleFaceCount(Integer multipleFaceCount) {
         this.multipleFaceCount = multipleFaceCount;
+    }
+
+    public Integer getFaceMismatchCount() {
+        return faceMismatchCount;
+    }
+
+    public void setFaceMismatchCount(Integer faceMismatchCount) {
+        this.faceMismatchCount = faceMismatchCount;
     }
 
     public Integer getCellPhoneCount() {

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Grid, Box, Card, Typography, Stack } from '@mui/material';
 import { Link, useNavigate } from 'react-router-dom';
 import PageContainer from 'src/components/container/PageContainer';
@@ -12,13 +12,18 @@ import { useRegisterMutation } from './../../slices/usersApiSlice';
 import { setCredentials } from './../../slices/authSlice';
 import Loader from './Loader';
 
+const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
+
 const userValidationSchema = yup.object({
   name: yup.string().min(2, 'Name must be at least 2 characters').required('Please enter your name'),
   email: yup.string().email('Enter a valid email address').required('Email is required'),
   password: yup
     .string()
-    .min(6, 'Password should be of minimum 6 characters length')
-    .required('Password is required'),
+    .required('Password is required')
+    .matches(
+      passwordRegex,
+      'Password must be at least 8 characters and include uppercase, lowercase, number, and special character',
+    ),
   confirm_password: yup
     .string()
     .required('Confirm Password is required')
@@ -51,6 +56,8 @@ const Register = () => {
   const navigate = useNavigate();
 
   const [register, { isLoading }] = useRegisterMutation();
+  const [faceData, setFaceData] = useState(null);
+  const [consentAgreed, setConsentAgreed] = useState(false);
   const { userInfo } = useSelector((state) => state.auth);
 
   useEffect(() => {
@@ -70,15 +77,36 @@ const Register = () => {
       toast.error('Passwords do not match');
       return;
     }
+
+    if (role === 'student') {
+      if (!consentAgreed) {
+        toast.error('You must agree to the face verification consent to register as a student.');
+        return;
+      }
+      if (!faceData || !faceData.isVerified || !faceData.faceImages || faceData.faceImages.length !== 3) {
+        toast.error('Please provide and verify all 3 face photos before completing registration.');
+        return;
+      }
+    }
+
     try {
-      const res = await register({
+      const payload = {
         name,
         email,
         password,
         role,
         studentId,
         clientCode: institution,
-      }).unwrap();
+      };
+
+      if (role === 'student' && faceData) {
+        payload.faceConsent = consentAgreed;
+        payload.faceImages = faceData.faceImages;
+        payload.faceEmbeddings = faceData.faceEmbeddings;
+        payload.averageEmbedding = faceData.averageEmbedding;
+      }
+
+      const res = await register(payload).unwrap();
 
       formik.resetForm();
 
@@ -126,8 +154,8 @@ const Register = () => {
             xs={12}
             sm={10}
             md={8}
-            lg={5}
-            xl={4}
+            lg={6}
+            xl={5}
             display="flex"
             justifyContent="center"
             alignItems="center"
@@ -153,6 +181,10 @@ const Register = () => {
 
               <AuthRegister
                 formik={formik}
+                faceData={faceData}
+                setFaceData={setFaceData}
+                consentAgreed={consentAgreed}
+                setConsentAgreed={setConsentAgreed}
                 subtext={
                   <Typography variant="subtitle1" textAlign="center" color="textSecondary" mb={2} fontWeight={500}>
                     Create your account to participate or manage exams

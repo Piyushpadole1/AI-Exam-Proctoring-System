@@ -328,24 +328,65 @@ public class ExamAttemptService {
 
         double percentage = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100.0 : 0.0;
         double passMark = exam.getPassingMarks() != null ? exam.getPassingMarks() : 40.0;
-        boolean passed = totalScore >= passMark;
+
+        // Check if attempt is terminated because of violations
+        boolean isTerminatedForViolations = attempt.getStatus() == AttemptStatus.DISQUALIFIED ||
+                (attempt.getTerminationReason() != null && !attempt.getTerminationReason().isBlank()) ||
+                (attempt.getIntegrityScore() != null && attempt.getIntegrityScore() <= 0.0);
+
+        Optional<ProctoringSession> sessionOpt = sessionRepository.findByAttemptId(attempt.getId());
+        if (sessionOpt.isPresent()) {
+            ProctoringSession session = sessionOpt.get();
+            if ("MALPRACTICE".equalsIgnoreCase(session.getVerdict()) ||
+                "TERMINATED".equalsIgnoreCase(session.getVerdict()) ||
+                (session.getIntegrityScore() != null && session.getIntegrityScore() <= 0.0)) {
+                isTerminatedForViolations = true;
+            }
+        }
+
+        // Universal Pass/Fail Rule:
+        // PASS only if BOTH:
+        // 1. The exam was NOT terminated because of violations
+        // 2. The student's obtained marks are at or above passing marks
+        // Otherwise the result is FAIL.
+        boolean marksPassed = totalScore >= passMark;
+        boolean passed = !isTerminatedForViolations && marksPassed;
+
+        String failReason = null;
+        if (!passed) {
+            if (isTerminatedForViolations) {
+                failReason = "Failed: exam terminated due to violations.";
+            } else {
+                failReason = "Failed: marks below passing score (" + Math.round(totalScore) + " obtained, " + Math.round(passMark) + " required).";
+            }
+        }
 
         attempt.setScore(totalScore);
         attempt.setPercentage(Math.round(percentage * 100.0) / 100.0);
         attempt.setPassed(passed);
-        attempt.setStatus(AttemptStatus.SUBMITTED);
+        attempt.setFailReason(failReason);
+        if (isTerminatedForViolations) {
+            attempt.setStatus(AttemptStatus.DISQUALIFIED);
+            if (attempt.getTerminationReason() == null || attempt.getTerminationReason().isBlank()) {
+                attempt.setTerminationReason("Proctoring violations");
+            }
+        } else {
+            attempt.setStatus(AttemptStatus.SUBMITTED);
+        }
         attempt.setSubmittedAt(LocalDateTime.now());
         attempt = attemptRepository.save(attempt);
 
         // Update ProctoringSession
-        Optional<ProctoringSession> sessionOpt = sessionRepository.findByAttemptId(attempt.getId());
         if (sessionOpt.isPresent()) {
             ProctoringSession session = sessionOpt.get();
             session.setEndedAt(LocalDateTime.now());
-            sessionRepository.save(session);
             if (session.getIntegrityScore() != null) {
                 attempt.setIntegrityScore(session.getIntegrityScore());
             }
+            if (isTerminatedForViolations) {
+                session.setVerdict("TERMINATED");
+            }
+            sessionRepository.save(session);
         }
         attempt = attemptRepository.save(attempt);
 

@@ -15,6 +15,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.aieval8.examproctoring.util.PasswordValidator;
 
 @Service
 public class AuthService {
@@ -23,17 +24,22 @@ public class AuthService {
     private final ClientRepository clientRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider tokenProvider;
+    private final FaceVerificationService faceVerificationService;
 
     public AuthService(UserRepository userRepository, ClientRepository clientRepository,
-                       PasswordEncoder passwordEncoder, JwtTokenProvider tokenProvider) {
+                       PasswordEncoder passwordEncoder, JwtTokenProvider tokenProvider, FaceVerificationService faceVerificationService) {
         this.userRepository = userRepository;
         this.clientRepository = clientRepository;
         this.passwordEncoder = passwordEncoder;
         this.tokenProvider = tokenProvider;
+        this.faceVerificationService = faceVerificationService;
     }
 
     @Transactional
     public AuthResponse registerTeacher(TeacherRegisterRequest request) {
+        if (!PasswordValidator.isValid(request.getPassword())) {
+            throw new IllegalArgumentException(PasswordValidator.PASSWORD_REQUIREMENTS_MESSAGE);
+        }
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new IllegalArgumentException("Email is already registered: " + request.getEmail());
         }
@@ -63,6 +69,9 @@ public class AuthService {
 
     @Transactional
     public AuthResponse registerStudent(StudentRegisterRequest request) {
+        if (!PasswordValidator.isValid(request.getPassword())) {
+            throw new IllegalArgumentException(PasswordValidator.PASSWORD_REQUIREMENTS_MESSAGE);
+        }
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new IllegalArgumentException("Email is already registered: " + request.getEmail());
         }
@@ -80,6 +89,16 @@ public class AuthService {
         student.setStudentIdNumber(request.getStudentIdNumber());
 
         student = userRepository.save(student);
+
+        if (request.getFaceImages() != null && !request.getFaceImages().isEmpty()) {
+            faceVerificationService.registerFaceProfile(
+                    student,
+                    request.getFaceConsent(),
+                    request.getFaceImages(),
+                    request.getFaceEmbeddings(),
+                    request.getAverageEmbedding()
+            );
+        }
 
         CustomUserDetails userDetails = new CustomUserDetails(student);
         String token = tokenProvider.generateToken(userDetails);

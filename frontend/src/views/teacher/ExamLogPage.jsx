@@ -56,6 +56,9 @@ const getSeverityChip = (severity) => {
 
 const getEventTypeChip = (eventType) => {
   const t = (eventType || '').toUpperCase();
+  if (t.includes('MISMATCH') || t.includes('UNAUTHORIZED')) {
+    return <Chip label={eventType} color="error" size="small" variant="filled" />;
+  }
   if (t.includes('PHONE') || t.includes('OBJECT')) {
     return <Chip label={eventType} color="error" size="small" variant="filled" />;
   }

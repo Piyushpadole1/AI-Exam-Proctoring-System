@@ -240,10 +240,24 @@ const ResultPage = () => {
               </Grid>
             </Paper>
 
-            {/* Termination Notice if applicable */}
+            {/* Pass / Fail Outcome Banner */}
+            {!detailedReport.passed ? (
+              <Alert severity="error" sx={{ mb: 2.5, fontWeight: 'bold', fontSize: '0.95rem' }}>
+                {detailedReport.failReason ||
+                  (detailedReport.status === 'DISQUALIFIED' || detailedReport.terminationReason
+                    ? 'Failed: exam terminated due to violations.'
+                    : `Failed: marks below passing score (${detailedReport.score} obtained, ${detailedReport.exam?.passingMarks || 40} required).`)}
+              </Alert>
+            ) : (
+              <Alert severity="success" sx={{ mb: 2.5, fontWeight: 'bold', fontSize: '0.95rem' }}>
+                Passed: Congratulations! You have satisfied all passing criteria and proctoring requirements.
+              </Alert>
+            )}
+
+            {/* Termination Details if applicable */}
             {detailedReport.terminationReason && (
-              <Alert severity="error" sx={{ mb: 2.5 }}>
-                <strong>Session Terminated:</strong> {detailedReport.terminationReason}
+              <Alert severity="warning" sx={{ mb: 2.5 }}>
+                <strong>Termination Notice:</strong> {detailedReport.terminationReason}
               </Alert>
             )}
 
@@ -603,7 +617,22 @@ const ResultPage = () => {
                                 sx={{ fontWeight: 'bold' }}
                               />
                             </TableCell>
-                            <TableCell>{getStatusChip(result.status, result.passed)}</TableCell>
+                            <TableCell>
+                              {getStatusChip(result.status, result.passed)}
+                              {!result.passed && (
+                                <Typography
+                                  variant="caption"
+                                  color="error.main"
+                                  display="block"
+                                  sx={{ mt: 0.5, fontWeight: 500, maxWidth: 220, lineHeight: 1.2 }}
+                                >
+                                  {result.failReason ||
+                                    (result.status === 'DISQUALIFIED' || result.terminationReason
+                                      ? 'Failed: exam terminated due to violations.'
+                                      : 'Failed: marks below passing score.')}
+                                </Typography>
+                              )}
+                            </TableCell>
                             <TableCell sx={{ fontSize: '0.85rem' }}>
                               {new Date(result.submittedAt || result.createdAt).toLocaleString()}
                             </TableCell>
@@ -790,7 +819,22 @@ const ResultPage = () => {
                               sx={{ ml: 1, fontWeight: 'bold' }}
                             />
                           </TableCell>
-                          <TableCell>{getStatusChip(result.status, result.passed)}</TableCell>
+                          <TableCell>
+                            {getStatusChip(result.status, result.passed)}
+                            {!result.passed && (
+                              <Typography
+                                variant="caption"
+                                color="error.main"
+                                display="block"
+                                sx={{ mt: 0.5, fontWeight: 500, maxWidth: 220, lineHeight: 1.2 }}
+                              >
+                                {result.failReason ||
+                                  (result.status === 'DISQUALIFIED' || result.terminationReason
+                                    ? 'Failed: exam terminated due to violations.'
+                                    : 'Failed: marks below passing score.')}
+                              </Typography>
+                            )}
+                          </TableCell>
                           <TableCell sx={{ fontSize: '0.85rem' }}>
                             {new Date(result.submittedAt || result.createdAt).toLocaleString()}
                           </TableCell>

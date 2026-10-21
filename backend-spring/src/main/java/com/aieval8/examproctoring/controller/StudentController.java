@@ -199,12 +199,13 @@ public class StudentController {
         averageScore = Math.round(averageScore * 10.0) / 10.0;
 
         long passCount = completedAttempts.stream()
-                .filter(a -> Boolean.TRUE.equals(a.getPassed()))
+                .filter(a -> a.getStatus() != AttemptStatus.DISQUALIFIED &&
+                             (a.getTerminationReason() == null || a.getTerminationReason().isBlank()) &&
+                             (a.getIntegrityScore() == null || a.getIntegrityScore() > 0.0) &&
+                             Boolean.TRUE.equals(a.getPassed()))
                 .count();
 
-        long failCount = completedAttempts.stream()
-                .filter(a -> Boolean.FALSE.equals(a.getPassed()))
-                .count();
+        long failCount = completedAttempts.size() - passCount;
 
         long totalViolations = 0;
         for (ExamAttempt a : attempts) {
@@ -228,17 +229,32 @@ public class StudentController {
         int limit = Math.min(sortedCompleted.size(), 6);
         for (int i = 0; i < limit; i++) {
             ExamAttempt a = sortedCompleted.get(i);
+            boolean isTerminated = a.getStatus() == AttemptStatus.DISQUALIFIED ||
+                    (a.getTerminationReason() != null && !a.getTerminationReason().isBlank()) ||
+                    (a.getIntegrityScore() != null && a.getIntegrityScore() <= 0.0);
+            double passMark = a.getExam() != null && a.getExam().getPassingMarks() != null ? a.getExam().getPassingMarks() : 40.0;
+            double score = a.getScore() != null ? a.getScore() : 0.0;
+            boolean marksPassed = score >= passMark;
+            boolean passed = !isTerminated && marksPassed && Boolean.TRUE.equals(a.getPassed());
+            String failReason = a.getFailReason();
+            if (!passed && (failReason == null || failReason.isBlank())) {
+                failReason = isTerminated ? "Failed: exam terminated due to violations." :
+                        "Failed: marks below passing score (" + Math.round(score) + " obtained, " + Math.round(passMark) + " required).";
+            }
+
             Map<String, Object> r = new HashMap<>();
             r.put("attemptId", a.getId());
             r.put("examId", a.getExam() != null ? a.getExam().getExamCode() : "");
             r.put("examName", a.getExam() != null ? a.getExam().getExamName() : "Exam");
             r.put("subject", a.getExam() != null ? a.getExam().getSubject() : "");
-            r.put("score", a.getScore());
+            r.put("score", score);
             r.put("totalMarks", a.getExam() != null ? a.getExam().getTotalMarks() : 100.0);
-            r.put("passingMarks", a.getExam() != null ? a.getExam().getPassingMarks() : 40.0);
+            r.put("passingMarks", passMark);
             r.put("percentage", a.getPercentage());
-            r.put("passed", a.getPassed());
-            r.put("status", a.getStatus().name());
+            r.put("passed", passed);
+            r.put("status", isTerminated ? "DISQUALIFIED" : a.getStatus().name());
+            r.put("terminationReason", a.getTerminationReason());
+            r.put("failReason", failReason);
             r.put("submittedAt", a.getSubmittedAt() != null ? a.getSubmittedAt().toString() : (a.getStartedAt() != null ? a.getStartedAt().toString() : ""));
 
             long vCount = 0;

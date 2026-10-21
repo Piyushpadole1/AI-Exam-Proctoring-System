@@ -37,6 +37,13 @@ public class User {
     @Column(name = "student_id_number", length = 50)
     private String studentIdNumber;
 
+    @Column(name = "is_face_registered", nullable = false)
+    private boolean isFaceRegistered = false;
+
+    @Lob
+    @Column(name = "profile_picture", columnDefinition = "LONGTEXT")
+    private String profilePicture;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -142,6 +149,14 @@ public class User {
         this.studentIdNumber = studentIdNumber;
     }
 
+    public boolean isFaceRegistered() {
+        return isFaceRegistered;
+    }
+
+    public void setFaceRegistered(boolean faceRegistered) {
+        this.isFaceRegistered = faceRegistered;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -156,5 +171,13 @@ public class User {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getProfilePicture() {
+        return profilePicture;
+    }
+
+    public void setProfilePicture(String profilePicture) {
+        this.profilePicture = profilePicture;
     }
 }

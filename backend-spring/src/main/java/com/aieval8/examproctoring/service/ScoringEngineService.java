@@ -19,6 +19,8 @@ public class ScoringEngineService {
             Map.entry("MULTIPLE_FACES", ViolationSeverity.CRITICAL),
             Map.entry("CELL_PHONE_DETECTED", ViolationSeverity.CRITICAL),
             Map.entry("CELL_PHONE", ViolationSeverity.CRITICAL),
+            Map.entry("FACE_MISMATCH", ViolationSeverity.CRITICAL),
+            Map.entry("UNAUTHORIZED_PERSON", ViolationSeverity.CRITICAL),
             Map.entry("LAPTOP_DETECTED", ViolationSeverity.CRITICAL),
             Map.entry("LAPTOP", ViolationSeverity.CRITICAL),
             Map.entry("BOOK_DETECTED", ViolationSeverity.HIGH),
@@ -28,6 +30,7 @@ public class ScoringEngineService {
             Map.entry("EYE_GAZE_AWAY", ViolationSeverity.MEDIUM),
             Map.entry("EYE_GAZE", ViolationSeverity.MEDIUM),
             Map.entry("GAZE_DEVIATION", ViolationSeverity.MEDIUM),
+            Map.entry("PROLONGED_LOOKING_AWAY", ViolationSeverity.MEDIUM),
             Map.entry("EXTERNAL_VOICE", ViolationSeverity.LOW),
             Map.entry("VOICE_DETECTED", ViolationSeverity.LOW),
             Map.entry("BACKGROUND_NOISE", ViolationSeverity.LOW),
@@ -42,7 +45,9 @@ public class ScoringEngineService {
     public boolean isHeadOrGaze(String eventType) {
         if (eventType == null) return false;
         String u = eventType.toUpperCase();
-        return u.contains("HEAD") || u.contains("GAZE");
+        // Downward gaze has 0 penalty and is never counted as an anomaly
+        if (u.contains("DOWNWARD")) return false;
+        return u.contains("HEAD") || u.contains("GAZE") || u.contains("LOOKING_AWAY");
     }
 
     public boolean isFullscreenOrBlur(String eventType) {
@@ -69,8 +74,13 @@ public class ScoringEngineService {
         if (eventType == null) return 0;
         String u = eventType.toUpperCase();
 
-        if (u.contains("CELL") || u.contains("PHONE") || u.contains("LAPTOP")) {
+        if (u.contains("DOWNWARD")) {
+            // Strictly 0 deduction for looking downward
+            return 0;
+        } else if (u.contains("CELL") || u.contains("PHONE") || u.contains("LAPTOP")) {
             return ProctoringConstants.DEDUCTION_CELL_PHONE; // 50 points
+        } else if (u.contains("MISMATCH") || u.contains("UNAUTHORIZED")) {
+            return ProctoringConstants.DEDUCTION_FACE_MISMATCH; // 30 points
         } else if (u.contains("MULTIPLE")) {
             return ProctoringConstants.DEDUCTION_MULTIPLE_FACES; // 30 points
         } else if (u.contains("NO_FACE") || u.contains("NOT_VISIBLE")) {

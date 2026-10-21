@@ -35,6 +35,40 @@ export const userApiSlice = apiSlice.injectEndpoints({
         method: 'PUT',
         body: data,
       }),
+      invalidatesTags: ['User', 'ProfilePhoto', 'ProfileSummary'],
+    }),
+    // [NEW] Get profile photo
+    getProfilePhoto: builder.query({
+      query: () => ({
+        url: `${USERS_URL}/profile-photo`,
+        method: 'GET',
+      }),
+      providesTags: ['ProfilePhoto'],
+    }),
+    // [NEW] Update profile photo (teacher only)
+    updateProfilePhoto: builder.mutation({
+      query: (data) => ({
+        url: `${USERS_URL}/profile-photo`,
+        method: 'PUT',
+        body: data,
+      }),
+      invalidatesTags: ['ProfilePhoto', 'ProfileSummary'],
+    }),
+    // [NEW] Get profile summary stats
+    getProfileSummary: builder.query({
+      query: () => ({
+        url: `${USERS_URL}/profile-summary`,
+        method: 'GET',
+      }),
+      providesTags: ['ProfileSummary'],
+    }),
+    // [NEW] Get user actionable tasks
+    getUserTasks: builder.query({
+      query: () => ({
+        url: `${USERS_URL}/tasks`,
+        method: 'GET',
+      }),
+      providesTags: ['UserTasks'],
     }),
     // [NEW] Send OTP to email
     sendOtp: builder.mutation({
@@ -80,4 +114,8 @@ export const {
   useGetPendingUsersQuery,
   useApproveUserMutation,
   useRejectUserMutation,
+  useGetProfilePhotoQuery,
+  useUpdateProfilePhotoMutation,
+  useGetProfileSummaryQuery,
+  useGetUserTasksQuery,
 } = userApiSlice;

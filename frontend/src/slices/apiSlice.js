@@ -24,7 +24,7 @@ export const apiSlice = createApi({
     },
   }),
 
-  tagTypes: ['User', 'PendingUsers', 'Exam'],
+  tagTypes: ['User', 'PendingUsers', 'Exam', 'ProfilePhoto', 'ProfileSummary', 'UserTasks'],
   // it like a prent to other api
   // it a build in builder
   endpoints: (builder) => ({}),

@@ -107,6 +107,20 @@ export default function Coder() {
   const [sessionId, setSessionId] = useState(null);
   const lastViolationTime = useRef({});
   const webcamRef = useRef(null);
+  const wsRef = useRef(null);
+  const pendingQueueRef = useRef([]);
+  const sessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+  const integrityScoreRef = useRef(integrityScore);
+  useEffect(() => {
+    integrityScoreRef.current = integrityScore;
+  }, [integrityScore]);
+  const isDisqualifiedRef = useRef(isDisqualified);
+  useEffect(() => {
+    isDisqualifiedRef.current = isDisqualified;
+  }, [isDisqualified]);
 
   // Unlock AudioContext for Siren on user/mount
   useEffect(() => {
@@ -186,18 +200,161 @@ export default function Coder() {
     fetchSessionId();
   }, [examId]);
 
+  const handleBackendScoreUpdate = useCallback((data) => {
+    if (!data) return;
+    const bScore =
+      data.integrityScore !== undefined
+        ? Number(data.integrityScore)
+        : data.fairnessScore !== undefined
+        ? Number(data.fairnessScore)
+        : null;
+
+    if (bScore !== null) {
+      integrityScoreRef.current = bScore;
+      setIntegrityScore(bScore);
+    }
+    if (data.totalViolations !== undefined) {
+      setTotalViolations(Number(data.totalViolations));
+    }
+
+    if (data.shouldTerminate || (bScore !== null && bScore <= 0)) {
+      if (!isDisqualifiedRef.current) {
+        setIsDisqualified(true);
+        isDisqualifiedRef.current = true;
+        const termReason = data.terminationReason || 'Integrity score reached 0';
+        setTerminationReason(termReason);
+        setDisqualifyDialogOpen(true);
+      }
+    }
+  }, []);
+
+  const dispatchReport = useCallback(
+    async (payload) => {
+      let sentViaWs = false;
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          wsRef.current.send(JSON.stringify({ action: 'VIOLATION', ...payload }));
+          sentViaWs = true;
+        } catch (wsErr) {
+          console.warn('[Coder] WS send error, falling back to HTTP:', wsErr);
+        }
+      }
+
+      if (!sentViaWs) {
+        try {
+          const res = await axiosInstance.post('/api/proctoring/events', payload, {
+            withCredentials: true,
+          });
+          if (res?.data) {
+            handleBackendScoreUpdate(res.data);
+          }
+        } catch (httpErr) {
+          console.warn('[Coder] HTTP report note, queuing for retry:', httpErr.message);
+          pendingQueueRef.current.push(payload);
+        }
+      }
+    },
+    [handleBackendScoreUpdate]
+  );
+
+  const flushPendingQueue = useCallback(async () => {
+    if (pendingQueueRef.current.length === 0) return;
+    const queued = [...pendingQueueRef.current];
+    pendingQueueRef.current = [];
+    for (const item of queued) {
+      await dispatchReport(item);
+    }
+  }, [dispatchReport]);
+
+  useEffect(() => {
+    let ws = null;
+    let reconnectTimeout = null;
+
+    const connectWS = () => {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.port === '3000'
+          ? `${window.location.hostname}:5000`
+          : window.location.host;
+        ws = new WebSocket(`${protocol}//${host}/ws/proctoring`);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          console.log('[Coder] Connected to real-time WebSocket');
+          flushPendingQueue();
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.action === 'VIOLATION_ACK') {
+              handleBackendScoreUpdate(data);
+            }
+          } catch (e) {}
+        };
+
+        ws.onclose = () => {
+          wsRef.current = null;
+          reconnectTimeout = setTimeout(() => {
+            if (!isDisqualifiedRef.current) {
+              connectWS();
+            }
+          }, 2000);
+        };
+      } catch (err) {}
+    };
+
+    connectWS();
+
+    const handleOnline = () => flushPendingQueue();
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) {
+        try { ws.close(); } catch (_) {}
+      }
+      wsRef.current = null;
+    };
+  }, [flushPendingQueue, handleBackendScoreUpdate]);
+
+  const uploadEvidence = useCallback(
+    async (violationId, screenshot) => {
+      if (!violationId || !screenshot) return;
+      const activeSessionId = sessionIdRef.current || sessionId || examId;
+      try {
+        await axiosInstance.post(
+          '/api/proctoring/evidence',
+          {
+            violationId,
+            sessionId: activeSessionId,
+            evidenceUrl: screenshot,
+          },
+          { withCredentials: true }
+        );
+      } catch (e) {
+        console.warn('[Coder] Background evidence upload note:', e.message);
+      }
+    },
+    [sessionId, examId]
+  );
+
   // Log Violation Handler with 100-Point Deductions, Cooldown, Siren, and Auto-Disqualification
   const logProctoringViolation = useCallback(
-    async (eventType, description, evidenceUrl = null) => {
+    async (eventType, description, evidenceUrl = null, violationId = null, captureScreenshot = null) => {
       const now = Date.now();
+      const cooldownMap = PROCTORING_CONFIG?.COOLDOWNS || {};
+      const cooldown = cooldownMap[eventType] || 3000;
       const last = lastViolationTime.current[eventType] || 0;
-      if (now - last < 4000) return; // 4s cooldown per type
+      if (now - last < cooldown) return;
       lastViolationTime.current[eventType] = now;
 
-      // Play Siren Alert
+      // 1. Play Siren Alert immediately (< 5ms)
       playSiren();
 
-      const isHeadGaze = eventType.includes('HEAD') || eventType.includes('GAZE');
+      const isHeadGaze =
+        eventType.includes('HEAD') || eventType.includes('GAZE') || eventType.includes('LOOKING_AWAY');
       const isFullscreen =
         eventType.includes('FULLSCREEN') ||
         eventType.includes('TAB_SWITCH') ||
@@ -227,21 +384,26 @@ export default function Coder() {
       } else if (eventType.includes('NO_FACE') || eventType.includes('NOT_VISIBLE')) {
         deduction = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.NO_PERSON || 20;
       } else if (isHeadGaze) {
-        if (nextHeadGaze > (PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.HEAD_GAZE_FREE_WARNINGS || 10)) {
-          deduction = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.HEAD_GAZE_PENALTY_POINTS || 5;
+        const freeLimit = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.HEAD_GAZE_FREE_WARNINGS || 5;
+        const penalty = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.HEAD_GAZE_PENALTY_POINTS || 10;
+        if (nextHeadGaze > freeLimit) {
+          deduction = penalty;
         }
       }
 
-      const tentativeScore = Math.max(0, integrityScore - deduction);
+      const tentativeScore = Math.max(0, (integrityScoreRef.current ?? integrityScore) - deduction);
+      integrityScoreRef.current = tentativeScore;
       setIntegrityScore(tentativeScore);
       setTotalViolations((p) => p + 1);
 
       // Warning Feedback Toast
       let toastMsg = '';
       if (isHeadGaze) {
-        toastMsg = nextHeadGaze <= 10
-          ? `⚠️ Warning ${nextHeadGaze} of 10: Head movement / eye gaze looking away`
-          : `⚠️ Warning ${nextHeadGaze}: Head/eye movement detected (5 points deducted)`;
+        const freeLimit = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.HEAD_GAZE_FREE_WARNINGS || 5;
+        const penalty = PROCTORING_CONFIG?.INTEGRITY_SYSTEM?.DEDUCTIONS?.HEAD_GAZE_PENALTY_POINTS || 10;
+        toastMsg = nextHeadGaze <= freeLimit
+          ? `⚠️ Warning ${nextHeadGaze} of ${freeLimit}: ${description || 'Looking away from screen'}`
+          : `🚨 Warning ${nextHeadGaze}: Looking away penalty! (${penalty} points deducted)`;
       } else if (isFullscreen) {
         toastMsg = nextFullscreen === 1
           ? '⚠️ Fullscreen Exit Warning (1 of 2): Return to fullscreen immediately!'
@@ -253,53 +415,52 @@ export default function Coder() {
       }
       toast.warn(toastMsg);
 
-      // Send to backend
-      let backendScore = tentativeScore;
-      let shouldTerminate = tentativeScore <= 0 || (isFullscreen && nextFullscreen >= 2);
-      let termReason = tentativeScore <= 0 ? 'Integrity score reached 0' : (isFullscreen && nextFullscreen >= 2 ? 'Left fullscreen twice' : '');
+      const activeSessionId = sessionIdRef.current || sessionId || examId;
+      const vId =
+        violationId ||
+        (typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : 'v_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9));
 
-      try {
-        const response = await axiosInstance.post(
-          '/api/proctoring/events',
-          {
-            sessionId: sessionId || examId,
-            eventType,
-            confidence: 1.0,
-            description: description || toastMsg,
-            evidenceUrl,
-            examId,
-            metadata: {
-              warningNumber: isHeadGaze ? nextHeadGaze : null,
-              fullscreenStrike: isFullscreen ? nextFullscreen : null,
-            },
-          },
-          { withCredentials: true }
-        );
+      // 2. Dispatch lightweight report immediately (< 10ms)
+      dispatchReport({
+        violationId: vId,
+        sessionId: activeSessionId,
+        eventType,
+        confidence: 1.0,
+        description: description || toastMsg,
+        evidenceUrl: null,
+        examId,
+        metadata: {
+          warningNumber: isHeadGaze ? nextHeadGaze : null,
+          fullscreenStrike: isFullscreen ? nextFullscreen : null,
+        },
+      });
 
-        if (response.data) {
-          if (response.data.integrityScore !== undefined) {
-            backendScore = response.data.integrityScore;
-            setIntegrityScore(backendScore);
-          }
-          if (response.data.shouldTerminate || backendScore <= 0) {
-            shouldTerminate = true;
-          }
-          if (response.data.terminationReason) {
-            termReason = response.data.terminationReason;
-          }
-        }
-      } catch (err) {
-        console.warn('Could not post proctoring event:', err.message);
+      // 3. Decoupled evidence upload: if screenshot exists or callable, send in background
+      if (evidenceUrl) {
+        setTimeout(() => uploadEvidence(vId, evidenceUrl), 30);
+      } else if (typeof captureScreenshot === 'function') {
+        setTimeout(() => {
+          try {
+            const sc = captureScreenshot();
+            if (sc) uploadEvidence(vId, sc);
+          } catch (_) {}
+        }, 30);
       }
 
+      const shouldTerminate = tentativeScore <= 0 || (isFullscreen && nextFullscreen >= 2);
+      const termReason = tentativeScore <= 0 ? 'Integrity score reached 0' : (isFullscreen && nextFullscreen >= 2 ? 'Left fullscreen twice' : '');
+
       // Check Termination
-      if ((shouldTerminate || isDisqualified) && !isDisqualified) {
+      if ((shouldTerminate || isDisqualifiedRef.current) && !isDisqualifiedRef.current) {
         setIsDisqualified(true);
-        setTerminationReason(termReason || (backendScore <= 0 ? 'Integrity score reached 0' : 'Violation threshold exceeded'));
+        isDisqualifiedRef.current = true;
+        setTerminationReason(termReason || (tentativeScore <= 0 ? 'Integrity score reached 0' : 'Violation threshold exceeded'));
         setDisqualifyDialogOpen(true);
         // Auto-submit current solution
         try {
-          await axiosInstance.post(
+          axiosInstance.post(
             '/api/coding/submit',
             {
               examId,
@@ -309,13 +470,13 @@ export default function Coder() {
               runOnly: false,
             },
             { withCredentials: true }
-          );
-        } catch (subErr) {
-          console.warn('Auto-submit on disqualification failed:', subErr);
-        }
+          ).catch((subErr) => {
+            console.warn('Auto-submit on disqualification failed:', subErr);
+          });
+        } catch (_) {}
       }
     },
-    [integrityScore, headGazeCount, fullscreenExits, isDisqualified, sessionId, examId, questionId, question, code, language]
+    [headGazeCount, fullscreenExits, sessionId, examId, questionId, question, code, language, integrityScore, dispatchReport, uploadEvidence]
   );
 
   // Fullscreen and Security Listeners
@@ -382,7 +543,9 @@ export default function Coder() {
       logProctoringViolation(
         violation.eventType,
         violation.description || 'Webcam proctor violation',
-        violation.evidenceUrl || violation.screenshot
+        violation.evidenceUrl || violation.screenshot,
+        violation.violationId,
+        violation.captureScreenshot
       );
     },
     [logProctoringViolation]

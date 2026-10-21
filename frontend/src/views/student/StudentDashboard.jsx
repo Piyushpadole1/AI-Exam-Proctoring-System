@@ -353,8 +353,19 @@ const StudentDashboard = () => {
                           <Chip
                             size="small"
                             color={r.passed ? 'success' : 'error'}
-                            label={r.passed ? 'PASSED' : 'FAILED'}
+                            label={r.passed ? 'PASSED' : (r.status === 'DISQUALIFIED' ? 'DISQUALIFIED' : 'FAILED')}
+                            sx={{ fontWeight: 'bold' }}
                           />
+                          {!r.passed && (
+                            <Typography
+                              variant="caption"
+                              color="error.main"
+                              display="block"
+                              sx={{ mt: 0.5, fontWeight: 500, maxWidth: 200, lineHeight: 1.2 }}
+                            >
+                              {r.failReason || (r.status === 'DISQUALIFIED' || r.terminationReason ? 'Failed: exam terminated due to violations.' : 'Failed: marks below passing score.')}
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Chip

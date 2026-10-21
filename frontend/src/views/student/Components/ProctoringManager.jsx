@@ -74,6 +74,197 @@ export default function ProctoringManager({
     onTerminateRef.current = onTerminate;
   }, [onTerminate]);
 
+  // Real-time WebSocket connection and offline retry queue
+  const wsRef = useRef(null);
+  const pendingQueueRef = useRef([]);
+
+  const handleBackendUpdate = useCallback((data) => {
+    if (!data) return;
+    const backendScore =
+      data.integrityScore !== undefined
+        ? Number(data.integrityScore)
+        : data.fairnessScore !== undefined
+        ? Number(data.fairnessScore)
+        : null;
+
+    if (backendScore !== null) {
+      integrityScoreRef.current = backendScore;
+      setIntegrityScore(backendScore);
+      setClassification(
+        data.classification ||
+          (backendScore >= 70 ? 'SAFE' : backendScore >= 30 ? 'WARNING' : 'MALPRACTICE')
+      );
+    }
+
+    if (data.totalViolations !== undefined) {
+      totalViolationsRef.current = Number(data.totalViolations);
+      setTotalViolations(totalViolationsRef.current);
+    }
+
+    if (data.shouldTerminate || (backendScore !== null && backendScore <= 0)) {
+      if (!isTerminatedRef.current) {
+        setIsTerminated(true);
+        isTerminatedRef.current = true;
+        const termReason = data.terminationReason || 'Integrity score reached 0';
+        toast.error(`Exam Terminated: ${termReason}`);
+        if (onTerminateRef.current) {
+          onTerminateRef.current(termReason);
+        }
+      }
+    }
+  }, []);
+
+  const dispatchReport = useCallback(
+    async (payload) => {
+      let sentViaWs = false;
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          wsRef.current.send(JSON.stringify({ action: 'VIOLATION', ...payload }));
+          sentViaWs = true;
+        } catch (wsErr) {
+          console.warn('[ProctoringManager] WS send error, falling back to HTTP:', wsErr);
+        }
+      }
+
+      if (!sentViaWs) {
+        try {
+          const res = await axiosInstance.post('/api/proctoring/events', payload, {
+            withCredentials: true,
+          });
+          if (res?.data) {
+            handleBackendUpdate(res.data);
+          }
+        } catch (httpErr) {
+          console.warn('[ProctoringManager] HTTP report failed, queued for retry:', httpErr.message);
+          pendingQueueRef.current.push(payload);
+        }
+      }
+    },
+    [handleBackendUpdate]
+  );
+
+  const flushPendingQueue = useCallback(async () => {
+    if (pendingQueueRef.current.length === 0) return;
+    const queued = [...pendingQueueRef.current];
+    pendingQueueRef.current = [];
+    for (const item of queued) {
+      await dispatchReport(item);
+    }
+  }, [dispatchReport]);
+
+  // Connect to persistent WebSocket with automatic reconnect and queue flush
+  useEffect(() => {
+    let ws = null;
+    let reconnectTimeout = null;
+
+    const connectWS = () => {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.port === '3000'
+          ? `${window.location.hostname}:5000`
+          : window.location.host;
+        ws = new WebSocket(`${protocol}//${host}/ws/proctoring`);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          console.log('[ProctoringManager] Connected to real-time WebSocket');
+          flushPendingQueue();
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.action === 'VIOLATION_ACK') {
+              handleBackendUpdate(data);
+            }
+          } catch (e) {}
+        };
+
+        ws.onclose = () => {
+          wsRef.current = null;
+          reconnectTimeout = setTimeout(() => {
+            if (isActiveRef.current && !isTerminatedRef.current) {
+              connectWS();
+            }
+          }, 2000);
+        };
+
+        ws.onerror = () => {
+          // Graceful fallback to HTTP
+        };
+      } catch (err) {
+        console.warn('[ProctoringManager] WebSocket setup:', err.message);
+      }
+    };
+
+    connectWS();
+
+    const handleOnline = () => {
+      flushPendingQueue();
+    };
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) {
+        try { ws.close(); } catch (_) {}
+      }
+      wsRef.current = null;
+    };
+  }, [flushPendingQueue, handleBackendUpdate]);
+
+  // Decoupled asynchronous background evidence upload
+  const uploadEvidence = useCallback(
+    async (violationId, screenshot) => {
+      if (!violationId || !screenshot) return;
+      const activeSessionId = sessionIdRef.current || sessionId;
+      if (!activeSessionId) return;
+
+      try {
+        await axiosInstance.post(
+          '/api/proctoring/evidence',
+          {
+            violationId,
+            sessionId: activeSessionId,
+            evidenceUrl: screenshot,
+          },
+          { withCredentials: true }
+        );
+      } catch (e) {
+        console.warn('[ProctoringManager] Decoupled evidence upload note:', e.message);
+      }
+    },
+    [sessionId]
+  );
+
+  const terminateSession = useCallback(
+    (reason) => {
+      if (isTerminatedRef.current) return;
+      setIsTerminated(true);
+      isTerminatedRef.current = true;
+      const termReason = reason || 'Exam terminated due to violations';
+      toast.error(`Exam Terminated: ${termReason}`);
+      if (onTerminateRef.current) {
+        onTerminateRef.current(termReason);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    window.__uploadProctoringEvidence = uploadEvidence;
+    window.__terminateExamSession = terminateSession;
+    return () => {
+      if (window.__uploadProctoringEvidence === uploadEvidence) {
+        delete window.__uploadProctoringEvidence;
+      }
+      if (window.__terminateExamSession === terminateSession) {
+        delete window.__terminateExamSession;
+      }
+    };
+  }, [uploadEvidence, terminateSession]);
+
   // ── Restore live score and violations from backend on mount or page refresh ──
   useEffect(() => {
     if (!sessionId) return;
@@ -162,12 +353,18 @@ export default function ProctoringManager({
       const activeSessionId = sessionIdRef.current || sessionId;
       if (!activeSessionId || !isActiveRef.current || isTerminatedRef.current) return;
 
-      // 1. Play Siren Alert immediately (< 10ms)
+      const eventType = violation.eventType || '';
+
+      // Downward gaze (keyboard/desk/paper/writing): Strictly zero warning, zero siren, zero deduction
+      if (eventType.toUpperCase().includes('DOWNWARD')) {
+        return;
+      }
+
+      // 1. Play Siren Alert immediately (< 5ms)
       playSiren();
 
-      const eventType = violation.eventType;
       const isHeadGaze =
-        eventType.includes('HEAD') || eventType.includes('GAZE');
+        eventType.includes('HEAD') || eventType.includes('GAZE') || eventType.includes('LOOKING_AWAY');
       const isFullscreen =
         eventType.includes('FULLSCREEN') ||
         eventType.includes('TAB_SWITCH') ||
@@ -191,14 +388,18 @@ export default function ProctoringManager({
       // 3. Calculate client-side tentative deduction for instant HUD update
       let localDeduction = 0;
       if (eventType.includes('CELL') || eventType.includes('PHONE') || eventType.includes('LAPTOP')) {
-        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.MOBILE_PHONE; // 50
+        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.MOBILE_PHONE || 50; // 50
+      } else if (eventType.includes('MISMATCH') || eventType.includes('UNAUTHORIZED')) {
+        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.FACE_MISMATCH || 30;
       } else if (eventType.includes('MULTIPLE')) {
-        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.MULTIPLE_FACES; // 30
+        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.MULTIPLE_FACES || 30; // 30
       } else if (eventType.includes('NO_FACE') || eventType.includes('NOT_VISIBLE')) {
-        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.NO_PERSON; // 20
+        localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.NO_PERSON || 20; // 20
       } else if (isHeadGaze) {
-        if (nextHeadGaze > PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_FREE_WARNINGS) {
-          localDeduction = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_PENALTY_POINTS; // 5
+        const freeLimit = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_FREE_WARNINGS || 10;
+        const penalty = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_PENALTY_POINTS || 5;
+        if (nextHeadGaze > freeLimit) {
+          localDeduction = penalty;
         }
       }
 
@@ -210,14 +411,18 @@ export default function ProctoringManager({
       totalViolationsRef.current += 1;
       setTotalViolations(totalViolationsRef.current);
 
-      // 4. Display Warning Message with detailed count/deduction
+      // 4. Display Warning Message with detailed count/deduction instantly (< 5ms)
       let displayMsg = '';
       if (isHeadGaze) {
-        if (nextHeadGaze <= 10) {
-          displayMsg = `⚠️ Warning ${nextHeadGaze} of 10: Head movement / eye gaze looking away`;
+        const freeLimit = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_FREE_WARNINGS || 10;
+        const penalty = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_PENALTY_POINTS || 5;
+        if (nextHeadGaze <= freeLimit) {
+          displayMsg = `⚠️ Warning ${nextHeadGaze} of ${freeLimit}: ${violation.description || 'Looking away from screen'}`;
         } else {
-          displayMsg = `⚠️ Warning ${nextHeadGaze}: Head/eye movement detected (5 points deducted)`;
+          displayMsg = `🚨 Warning ${nextHeadGaze}: Looking away penalty! (${penalty} points deducted)`;
         }
+      } else if (eventType.includes('MISMATCH') || eventType.includes('UNAUTHORIZED')) {
+        displayMsg = `🚨 Face Mismatch: ${violation.description || 'Unrecognized face detected'} (-${localDeduction} points deducted)`;
       } else if (isFullscreen) {
         if (nextFullscreen === 1) {
           displayMsg = '⚠️ Fullscreen Exit Warning (1 of 2): Return to fullscreen immediately!';
@@ -234,11 +439,12 @@ export default function ProctoringManager({
 
       // Generate client-side UUID for idempotency
       const violationId =
-        (typeof crypto !== 'undefined' && crypto.randomUUID)
+        violation.violationId ||
+        (typeof crypto !== 'undefined' && crypto.randomUUID
           ? crypto.randomUUID()
-          : 'v_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+          : 'v_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9));
 
-      // 5. Send lightweight violation event first (< 20ms) without heavy screenshot
+      // 5. Send lightweight violation event first (< 10ms) without heavy screenshot
       const lightweightPayload = {
         violationId,
         sessionId: activeSessionId,
@@ -253,85 +459,34 @@ export default function ProctoringManager({
         },
       };
 
-      // 6. Decoupled evidence upload: if screenshot exists, send asynchronously
+      // Dispatch immediately over WebSocket (with HTTP fallback and offline queue)
+      dispatchReport(lightweightPayload);
+
+      // 6. Decoupled evidence upload: if screenshot is available or can be captured, send in background
       const rawScreenshot = violation.evidenceUrl || violation.screenshot;
       if (rawScreenshot) {
-        setTimeout(async () => {
+        setTimeout(() => {
+          uploadEvidence(violationId, rawScreenshot);
+        }, 30);
+      } else if (typeof violation.captureScreenshot === 'function') {
+        setTimeout(() => {
           try {
-            await axiosInstance.post(
-              '/api/proctoring/evidence',
-              {
-                violationId,
-                sessionId: activeSessionId,
-                evidenceUrl: rawScreenshot,
-              },
-              { withCredentials: true }
-            );
-          } catch (evidenceErr) {
-            console.warn('[ProctoringManager] Asynchronous evidence upload note:', evidenceErr.message);
-          }
-        }, 50);
+            const sc = violation.captureScreenshot();
+            if (sc) uploadEvidence(violationId, sc);
+          } catch (_) {}
+        }, 30);
       }
 
-      try {
-        const response = await axiosInstance.post('/api/proctoring/events', lightweightPayload, {
-          withCredentials: true,
-        });
-
-        if (response?.data) {
-          const data = response.data;
-          const backendScore =
-            data.integrityScore !== undefined
-              ? Number(data.integrityScore)
-              : data.fairnessScore !== undefined
-              ? Number(data.fairnessScore)
-              : tentativeScore;
-
-          integrityScoreRef.current = backendScore;
-          setIntegrityScore(backendScore);
-          setClassification(
-            data.classification ||
-              (backendScore >= 70 ? 'SAFE' : backendScore >= 30 ? 'WARNING' : 'MALPRACTICE')
-          );
-
-          if (data.totalViolations !== undefined) {
-            totalViolationsRef.current = Number(data.totalViolations);
-            setTotalViolations(totalViolationsRef.current);
-          }
-
-          // Termination check: score <= 0 or 2nd fullscreen exit
-          const isTerm =
-            data.shouldTerminate ||
-            backendScore <= 0 ||
-            (isFullscreen && nextFullscreen >= 2) ||
-            violation.forceTerminate;
-
-          if (isTerm && !isTerminatedRef.current) {
-            setIsTerminated(true);
-            isTerminatedRef.current = true;
-            const termReason =
-              violation.terminationReason ||
-              data.terminationReason ||
-              (backendScore <= 0 ? 'Integrity score reached 0' : 'Left fullscreen twice');
-
-            toast.error(`Exam Terminated: ${termReason}`);
-            if (onTerminateRef.current) {
-              onTerminateRef.current(termReason);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[ProctoringManager] Backend event sync note:', err.message);
-        // Fallback local termination
-        if ((tentativeScore <= 0 || (isFullscreen && nextFullscreen >= 2)) && !isTerminatedRef.current) {
-          setIsTerminated(true);
-          isTerminatedRef.current = true;
-          const termReason = tentativeScore <= 0 ? 'Integrity score reached 0' : 'Left fullscreen twice';
-          if (onTerminateRef.current) onTerminateRef.current(termReason);
-        }
+      // Check local immediate disqualification conditions
+      if ((tentativeScore <= 0 || (isFullscreen && nextFullscreen >= 2)) && !isTerminatedRef.current) {
+        setIsTerminated(true);
+        isTerminatedRef.current = true;
+        const termReason = tentativeScore <= 0 ? 'Integrity score reached 0' : 'Left fullscreen twice';
+        toast.error(`Exam Terminated: ${termReason}`);
+        if (onTerminateRef.current) onTerminateRef.current(termReason);
       }
     },
-    [sessionId]
+    [sessionId, dispatchReport, uploadEvidence]
   );
 
   const getScoreColor = () => {

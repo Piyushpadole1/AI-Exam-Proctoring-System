@@ -39,6 +39,15 @@ public class ProctoringSession {
     @Column(name = "total_violations", nullable = false)
     private Integer totalViolations = 0;
 
+    @Column(name = "face_verification_status", length = 30)
+    private String faceVerificationStatus = "VERIFIED";
+
+    @Column(name = "consecutive_face_mismatches", nullable = false)
+    private int consecutiveFaceMismatches = 0;
+
+    @Column(name = "total_face_mismatches", nullable = false)
+    private int totalFaceMismatches = 0;
+
     @Column(name = "violation_summary_json", columnDefinition = "TEXT")
     private String violationSummaryJson = "{}";
 
@@ -154,5 +163,29 @@ public class ProctoringSession {
 
     public void setViolationSummaryJson(String violationSummaryJson) {
         this.violationSummaryJson = violationSummaryJson;
+    }
+
+    public String getFaceVerificationStatus() {
+        return faceVerificationStatus;
+    }
+
+    public void setFaceVerificationStatus(String faceVerificationStatus) {
+        this.faceVerificationStatus = faceVerificationStatus;
+    }
+
+    public int getConsecutiveFaceMismatches() {
+        return consecutiveFaceMismatches;
+    }
+
+    public void setConsecutiveFaceMismatches(int consecutiveFaceMismatches) {
+        this.consecutiveFaceMismatches = consecutiveFaceMismatches;
+    }
+
+    public int getTotalFaceMismatches() {
+        return totalFaceMismatches;
+    }
+
+    public void setTotalFaceMismatches(int totalFaceMismatches) {
+        this.totalFaceMismatches = totalFaceMismatches;
     }
 }

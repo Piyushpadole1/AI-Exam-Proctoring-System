@@ -51,6 +51,15 @@ public class ExamAttempt {
     @Column(name = "termination_reason")
     private String terminationReason;
 
+    @Column(name = "fail_reason")
+    private String failReason;
+
+    @Column(name = "face_verification_status", length = 30)
+    private String faceVerificationStatus = "VERIFIED";
+
+    @Column(name = "face_mismatch_count", nullable = false)
+    private int faceMismatchCount = 0;
+
     @Column(name = "saved_answers", columnDefinition = "LONGTEXT")
     private String savedAnswers;
 
@@ -202,6 +211,30 @@ public class ExamAttempt {
 
     public void setTerminationReason(String terminationReason) {
         this.terminationReason = terminationReason;
+    }
+
+    public String getFailReason() {
+        return failReason;
+    }
+
+    public void setFailReason(String failReason) {
+        this.failReason = failReason;
+    }
+
+    public String getFaceVerificationStatus() {
+        return faceVerificationStatus;
+    }
+
+    public void setFaceVerificationStatus(String faceVerificationStatus) {
+        this.faceVerificationStatus = faceVerificationStatus;
+    }
+
+    public int getFaceMismatchCount() {
+        return faceMismatchCount;
+    }
+
+    public void setFaceMismatchCount(int faceMismatchCount) {
+        this.faceMismatchCount = faceMismatchCount;
     }
 
     public String getSavedAnswers() {

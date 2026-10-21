@@ -243,6 +243,21 @@ const ProctoringReport = () => {
                         {result.totalMarks}
                       </Typography>
                     </Grid>
+                    <Grid item xs={12} mt={1}>
+                      <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+                        <Chip
+                          label={result.passed ? 'PASSED' : (session?.status === 'TERMINATED' || result.status === 'DISQUALIFIED' ? 'DISQUALIFIED' : 'FAILED')}
+                          color={result.passed ? 'success' : 'error'}
+                          size="small"
+                          sx={{ fontWeight: 'bold' }}
+                        />
+                        {!result.passed && (
+                          <Typography variant="body2" color="error.main" fontWeight={600}>
+                            {result.failReason || (session?.status === 'TERMINATED' || result.status === 'DISQUALIFIED' ? 'Failed: exam terminated due to violations.' : 'Failed: marks below passing score.')}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Grid>
                   </Grid>
                 ) : (
                   <Typography color="textSecondary">Result not yet calculated</Typography>

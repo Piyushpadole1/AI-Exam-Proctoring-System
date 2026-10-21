@@ -45,6 +45,7 @@ CREATE TABLE users (
     password VARCHAR(255) NOT NULL,
     phone VARCHAR(30) NULL,
     student_id_number VARCHAR(50) NULL,
+    is_face_registered BIT(1) NOT NULL DEFAULT b'0',
     role ENUM('ROLE_ADMIN', 'ROLE_TEACHER', 'ROLE_STUDENT') NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
     client_id BIGINT NULL,
@@ -55,6 +56,27 @@ CREATE TABLE users (
     KEY idx_users_role (role),
     KEY idx_users_client_id (client_id),
     CONSTRAINT fk_users_client FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+-- 2b. Table: user_face_profiles
+-- Securely stored biometric face embeddings and reference registration photos
+-- ---------------------------------------------------------------------
+CREATE TABLE user_face_profiles (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    consent_agreed BIT(1) NOT NULL DEFAULT b'1',
+    embedding_model VARCHAR(50) NOT NULL DEFAULT 'face-api-resnet128',
+    embeddings_json LONGTEXT NOT NULL,
+    average_embedding_json LONGTEXT NOT NULL,
+    image1_data LONGTEXT NOT NULL,
+    image2_data LONGTEXT NOT NULL,
+    image3_data LONGTEXT NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NULL ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_face_profiles_user_id (user_id),
+    CONSTRAINT fk_face_profiles_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -182,6 +204,9 @@ CREATE TABLE exam_attempts (
     passed BIT(1) NULL DEFAULT 0,
     integrity_score DOUBLE NOT NULL DEFAULT 100.0,
     termination_reason VARCHAR(255) NULL,
+    fail_reason VARCHAR(255) NULL,
+    face_verification_status VARCHAR(30) DEFAULT 'VERIFIED',
+    face_mismatch_count INT NOT NULL DEFAULT 0,
     saved_answers LONGTEXT NULL,
     device_info TEXT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -210,6 +235,9 @@ CREATE TABLE proctoring_sessions (
     hybrid_score DOUBLE NOT NULL DEFAULT 0.0,
     integrity_score DOUBLE NOT NULL DEFAULT 100.0,
     total_violations INT NOT NULL DEFAULT 0,
+    face_verification_status VARCHAR(30) DEFAULT 'VERIFIED',
+    consecutive_face_mismatches INT NOT NULL DEFAULT 0,
+    total_face_mismatches INT NOT NULL DEFAULT 0,
     verdict VARCHAR(20) NOT NULL DEFAULT 'SAFE',
     violation_summary_json TEXT NULL,
     PRIMARY KEY (id),
@@ -253,6 +281,7 @@ CREATE TABLE cheating_logs (
     cell_phone_count INT NULL DEFAULT 0,
     no_face_count INT NULL DEFAULT 0,
     multiple_face_count INT NULL DEFAULT 0,
+    face_mismatch_count INT NULL DEFAULT 0,
     prohibited_object_count INT NULL DEFAULT 0,
     screenshots_json LONGTEXT NULL,
     fairness_score DOUBLE NULL DEFAULT 100.0,

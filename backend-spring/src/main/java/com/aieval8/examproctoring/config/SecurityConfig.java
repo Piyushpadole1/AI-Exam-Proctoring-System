@@ -63,6 +63,8 @@ public class SecurityConfig {
                                 "/api/proctoring/**",
                                 "/api/users/logout",
                                 "/api/health",
+                                "/ws/**",
+                                "/api/ws/**",
                                 "/error"
                         ).permitAll()
                         .anyRequest().authenticated()
