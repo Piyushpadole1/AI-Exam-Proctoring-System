@@ -25,6 +25,37 @@ public class FaceVerificationController {
     }
 
     /**
+     * Authoritative Pre-Exam Identity Verification:
+     * Compares multiple live frames against the registered profile using strict threshold & liveness,
+     * and securely records verification to gate session start and questions access.
+     */
+    @PostMapping("/proctoring/pre-exam-verify")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<?> preExamVerify(
+            @RequestBody Map<String, Object> payload,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        User student = userRepository.findById(userDetails.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Student not found"));
+
+        String examId = (String) payload.get("examId");
+        if (examId == null || examId.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "examId is required."));
+        }
+
+        @SuppressWarnings("unchecked")
+        List<List<Double>> liveEmbeddings = (List<List<Double>>) payload.get("liveEmbeddings");
+        String evidenceScreenshot = (String) payload.get("evidenceScreenshot");
+        Boolean livenessPassed = payload.get("livenessPassed") != null
+                ? Boolean.valueOf(payload.get("livenessPassed").toString())
+                : true;
+
+        Map<String, Object> result = faceVerificationService.preExamVerify(
+                student, examId, liveEmbeddings, evidenceScreenshot, livenessPassed
+        );
+        return ResponseEntity.ok(result);
+    }
+
+    /**
      * Live verification check: compares live webcam embedding with registered face profile.
      */
     @PostMapping("/proctoring/verify-face")

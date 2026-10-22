@@ -4,7 +4,7 @@ import {
   Button,
   TextField,
   FormControlLabel,
-  Checkbox,
+  Radio,
   Stack,
   Select,
   MenuItem,
@@ -29,7 +29,7 @@ const AddQuestionForm = () => {
   const [questions, setQuestions] = useState([]);
   const [newQuestion, setNewQuestion] = useState('');
   const [newOptions, setNewOptions] = useState(['', '', '', '']);
-  const [correctOptions, setCorrectOptions] = useState([true, false, false, false]);
+  const [selectedCorrectOption, setSelectedCorrectOption] = useState(0);
   const [marks, setMarks] = useState(1);
   const [selectedExamId, setSelectedExamId] = useState('');
   const [loadingQuestions, setLoadingQuestions] = useState(false);
@@ -44,7 +44,7 @@ const AddQuestionForm = () => {
   );
   const maxQuestions = selectedExam?.totalQuestions || 0;
   const currentCount = questions.length;
-  const isCapacityReached = maxQuestions > 0 && currentCount >= maxQuestions;
+  const isCapacityReached = false; // Teachers can always add questions to expand exams
 
   // Pre-select first exam when available
   useEffect(() => {
@@ -80,10 +80,8 @@ const AddQuestionForm = () => {
     fetchExistingQuestions();
   }, [selectedExamId]);
 
-  const handleOptionCorrectToggle = (index) => {
-    const updated = [...correctOptions];
-    updated[index] = !updated[index];
-    setCorrectOptions(updated);
+  const handleOptionCorrectChange = (index) => {
+    setSelectedCorrectOption(index);
   };
 
   const handleAddQuestion = async () => {
@@ -114,20 +112,16 @@ const AddQuestionForm = () => {
       return;
     }
 
-    if (!correctOptions.some(Boolean)) {
-      setValidationError('Please check at least one correct option.');
-      toast.error('At least one option must be marked as correct.');
-      return;
-    }
-
     const payload = {
       examId: selectedExamId,
       question: newQuestion.trim(),
       marks: Number(marks) || 1,
+      correctOptionIndex: selectedCorrectOption,
       options: newOptions.map((text, idx) => ({
         optionText: text.trim(),
         text: text.trim(),
-        isCorrect: Boolean(correctOptions[idx]),
+        option: text.trim(),
+        isCorrect: idx === selectedCorrectOption,
       })),
     };
 
@@ -148,7 +142,7 @@ const AddQuestionForm = () => {
       // Reset input form
       setNewQuestion('');
       setNewOptions(['', '', '', '']);
-      setCorrectOptions([true, false, false, false]);
+      setSelectedCorrectOption(0);
       setMarks(1);
       setValidationError('');
     } catch (err) {
@@ -291,15 +285,15 @@ const AddQuestionForm = () => {
               />
               <FormControlLabel
                 control={
-                  <Checkbox
-                    checked={Boolean(correctOptions[idx])}
-                    onChange={() => handleOptionCorrectToggle(idx)}
+                  <Radio
+                    checked={selectedCorrectOption === idx}
+                    onChange={() => handleOptionCorrectChange(idx)}
                     color="success"
                     disabled={isCapacityReached}
                   />
                 }
-                label="Correct"
-                sx={{ minWidth: 100 }}
+                label={selectedCorrectOption === idx ? "Correct Ans ✓" : "Mark Correct"}
+                sx={{ minWidth: 140 }}
               />
             </Stack>
           ))}

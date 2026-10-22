@@ -55,7 +55,7 @@ public class ExamAttempt {
     private String failReason;
 
     @Column(name = "face_verification_status", length = 30)
-    private String faceVerificationStatus = "VERIFIED";
+    private String faceVerificationStatus = "PENDING";
 
     @Column(name = "face_mismatch_count", nullable = false)
     private int faceMismatchCount = 0;

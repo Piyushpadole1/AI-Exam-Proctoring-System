@@ -28,6 +28,7 @@ public class ExamAttemptService {
     private final CodingQuestionRepository codingQuestionRepository;
     private final ProctoringSessionRepository sessionRepository;
     private final UserRepository userRepository;
+    private final PreExamVerificationRepository preExamVerificationRepository;
     private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -38,6 +39,7 @@ public class ExamAttemptService {
                               CodingQuestionRepository codingQuestionRepository,
                               ProctoringSessionRepository sessionRepository,
                               UserRepository userRepository,
+                              PreExamVerificationRepository preExamVerificationRepository,
                               org.springframework.security.crypto.password.PasswordEncoder passwordEncoder) {
         this.attemptRepository = attemptRepository;
         this.enrollmentRepository = enrollmentRepository;
@@ -46,6 +48,7 @@ public class ExamAttemptService {
         this.codingQuestionRepository = codingQuestionRepository;
         this.sessionRepository = sessionRepository;
         this.userRepository = userRepository;
+        this.preExamVerificationRepository = preExamVerificationRepository;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -135,6 +138,19 @@ public class ExamAttemptService {
             return new AttemptResponse(attempt, secondsLeft);
         }
 
+        // GATEKEEPER 2.7: Pre-exam biometric face verification check
+        PreExamVerification validPev = null;
+        if (student.getRole() == Role.ROLE_STUDENT) {
+            Optional<PreExamVerification> pevOpt = preExamVerificationRepository
+                    .findTopByStudentIdAndExamIdAndVerifiedTrueAndConsumedFalseAndExpiresAtAfterOrderByVerifiedAtDesc(
+                            student.getId(), exam.getId(), LocalDateTime.now());
+
+            if (pevOpt.isEmpty()) {
+                throw new ExamAccessException("Access Denied: Biometric face identity verification has not been passed for this exam. Please complete verification before starting.");
+            }
+            validPev = pevOpt.get();
+        }
+
         // GATEKEEPER 4: Exam availability and timeline check
         if ("ARCHIVED".equalsIgnoreCase(exam.getStatus()) || "DRAFT".equalsIgnoreCase(exam.getStatus())) {
             throw new ExamAccessException("Exam is currently not active or available.");
@@ -157,7 +173,16 @@ public class ExamAttemptService {
         LocalDateTime deadline = LocalDateTime.now().plusMinutes(durationMins);
 
         ExamAttempt attempt = new ExamAttempt(enrollment, exam, student, deadline, deviceInfo);
+        if (validPev != null) {
+            attempt.setFaceVerificationStatus("VERIFIED");
+        }
         attempt = attemptRepository.save(attempt);
+
+        if (validPev != null) {
+            validPev.setConsumed(true);
+            validPev.setConsumedAt(LocalDateTime.now());
+            preExamVerificationRepository.save(validPev);
+        }
 
         // Increment attempts used
         enrollment.setAttemptsUsed(enrollment.getAttemptsUsed() + 1);
@@ -165,6 +190,9 @@ public class ExamAttemptService {
 
         // Create ProctoringSession
         ProctoringSession session = new ProctoringSession(attempt);
+        if (validPev != null) {
+            session.setFaceVerificationStatus("VERIFIED");
+        }
         sessionRepository.save(session);
 
         long secondsLeft = (long) durationMins * 60;
@@ -257,11 +285,16 @@ public class ExamAttemptService {
                     // 1. Direct index matching (0-based)
                     try {
                         int selected = Integer.parseInt(cleanAns);
-                        if (selected == q.getCorrectOptionIndex()) {
-                            isMatch = true;
-                        } else if (selected == (q.getCorrectOptionIndex() + 1)) {
-                            // 1-based index support
-                            isMatch = true;
+                        int optCount = rawOpts != null ? rawOpts.size() : 4;
+                        if (selected >= 0 && selected < optCount) {
+                            if (selected == q.getCorrectOptionIndex()) {
+                                isMatch = true;
+                            }
+                        } else if (selected > 0 && (selected - 1) < optCount) {
+                            // 1-based index support fallback
+                            if ((selected - 1) == q.getCorrectOptionIndex()) {
+                                isMatch = true;
+                            }
                         }
                     } catch (NumberFormatException ignored) {}
 

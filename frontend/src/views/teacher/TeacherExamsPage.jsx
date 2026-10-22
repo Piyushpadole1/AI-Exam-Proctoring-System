@@ -312,6 +312,9 @@ const TeacherExamsPage = () => {
     }
 
     try {
+      const selectedCorrectIndex = questionFormData.options.findIndex((o) => o.isCorrect);
+      const corrIndex = selectedCorrectIndex >= 0 ? selectedCorrectIndex : 0;
+
       if (editingQuestion) {
         // Update existing question
         const qId = editingQuestion._id || editingQuestion.id;
@@ -319,6 +322,7 @@ const TeacherExamsPage = () => {
           question: questionFormData.question,
           marks: Number(questionFormData.marks || 1),
           options: questionFormData.options,
+          correctOptionIndex: corrIndex,
         });
         toast.success('Question updated successfully');
       } else {
@@ -329,6 +333,7 @@ const TeacherExamsPage = () => {
           question: questionFormData.question,
           marks: Number(questionFormData.marks || 1),
           options: questionFormData.options,
+          correctOptionIndex: corrIndex,
         });
         toast.success('Question added successfully');
       }
@@ -447,7 +452,7 @@ const TeacherExamsPage = () => {
                     <TableCell>{exam.subject || 'General'}</TableCell>
                     <TableCell align="center">{exam.duration} mins</TableCell>
                     <TableCell align="center">
-                      <Chip label={`${exam.totalQuestions || 0} MCQs`} size="small" />
+                      <Chip label={`\${exam.totalQuestions || exam.mcqCount || 0} MCQs`} size="small" />
                     </TableCell>
                     <TableCell align="center">{exam.passingMarks || 40}%</TableCell>
                     <TableCell align="center">
@@ -924,15 +929,15 @@ const TeacherExamsPage = () => {
                           color="primary"
                           onClick={() => {
                             setEditingQuestion(q);
+                            const corrIdx = q.correctOptionIndex != null ? q.correctOptionIndex : 0;
                             setQuestionFormData({
                               question: q.question || q.questionText || '',
                               marks: q.marks || 1,
                               options: Array.isArray(q.options)
-                                ? q.options.map((o) =>
-                                    typeof o === 'string'
-                                      ? { option: o, isCorrect: false }
-                                      : { option: o.option || '', isCorrect: Boolean(o.isCorrect) }
-                                  )
+                                ? q.options.map((o, idx) => ({
+                                    option: typeof o === 'string' ? o : (o.option || o.optionText || o.text || ''),
+                                    isCorrect: idx === corrIdx,
+                                  }))
                                 : [
                                     { option: '', isCorrect: true },
                                     { option: '', isCorrect: false },
@@ -957,8 +962,10 @@ const TeacherExamsPage = () => {
                     <Box pl={2}>
                       {Array.isArray(q.options) &&
                         q.options.map((opt, optIdx) => {
-                          const optText = typeof opt === 'string' ? opt : opt.option;
-                          const isCorrect = typeof opt === 'object' ? opt.isCorrect : optIdx === q.correctOptionIndex;
+                          const optText = typeof opt === 'string' ? opt : (opt.option || opt.optionText || opt.text || '');
+                          const isCorrect = q.correctOptionIndex != null
+                            ? optIdx === q.correctOptionIndex
+                            : (typeof opt === 'object' ? opt.isCorrect : false);
                           return (
                             <Typography
                               key={optIdx}

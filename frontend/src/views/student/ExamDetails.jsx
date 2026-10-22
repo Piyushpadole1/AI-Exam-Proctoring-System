@@ -36,7 +36,8 @@ const DescriptionAndInstructions = () => {
   const { userInfo } = useSelector((state) => state.auth);
 
   const { data: exams, isLoading: examsLoading } = useGetExamsQuery();
-  const { data: questions, isLoading: questionsLoading } = useGetQuestionsQuery(examId);
+  const isTeacher = Boolean((userInfo?.role || '').toLowerCase().includes('teacher') || (userInfo?.role || '').toLowerCase().includes('admin'));
+  const { data: questions, isLoading: questionsLoading } = useGetQuestionsQuery(examId, { skip: !isTeacher });
 
   const [codingQuestion, setCodingQuestion] = useState(null);
   const [certify, setCertify] = useState(false);
@@ -48,7 +49,7 @@ const DescriptionAndInstructions = () => {
   const exam = exams?.find(
     (e) => e.examId === examId || String(e._id) === String(examId) || String(e.id) === String(examId)
   );
-  const isTeacher = (userInfo?.role || '').toLowerCase().includes('teacher');
+  
 
   useEffect(() => {
     if (examId) {
@@ -63,7 +64,7 @@ const DescriptionAndInstructions = () => {
     }
   }, [examId]);
 
-  const mcqCount = questions?.length ?? 0;
+  const mcqCount = (questions && Array.isArray(questions) && questions.length > 0) ? questions.length : Number(exam?.totalQuestions || exam?.mcqCount || 0);
   const hasCodingQuestion = Boolean(codingQuestion);
   const hasConfiguredQuestions = mcqCount > 0 || hasCodingQuestion;
   const [requestingEnrollment, setRequestingEnrollment] = useState(false);
@@ -157,7 +158,7 @@ const DescriptionAndInstructions = () => {
     }
   };
 
-  if (examsLoading || questionsLoading) {
+  if (examsLoading || (isTeacher && questionsLoading)) {
     return (
       <Card>
         <CardContent sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>

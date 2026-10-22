@@ -17,7 +17,7 @@ public final class ProctoringConstants {
     // Face identity verification rules
     public static final int MAX_CONSECUTIVE_FACE_MISMATCHES = 3;
     public static final long FACE_VERIFICATION_INTERVAL_MS = 12000L;
-    public static final double FACE_VERIFICATION_DISTANCE_THRESHOLD = 0.58;
+    public static final double FACE_VERIFICATION_DISTANCE_THRESHOLD = 0.40;
 
     // Head movement, Eye gaze & Prolonged Looking Away: 10 free warnings, 5 points each from 11th onward
     public static final int HEAD_GAZE_FREE_WARNINGS = 10;

@@ -145,12 +145,20 @@ export async function analyzeFace(imageSource) {
   }
 
   const descriptor = Array.from(match.descriptor);
+  const leftEye = match.landmarks ? match.landmarks.getLeftEye() : null;
+  const rightEye = match.landmarks ? match.landmarks.getRightEye() : null;
+  const nose = match.landmarks ? match.landmarks.getNose() : null;
+  const leftEAR = leftEye ? calculateEyeAspectRatio(leftEye) : 0.3;
+  const rightEAR = rightEye ? calculateEyeAspectRatio(rightEye) : 0.3;
+  const avgEAR = (leftEAR + rightEAR) / 2.0;
 
   return {
     success: true,
     descriptor,
     brightness: Math.round(brightness),
     confidence: Math.round(match.detection.score * 100),
+    ear: Math.round(avgEAR * 1000) / 1000,
+    nosePoint: nose && nose[3] ? { x: Math.round(nose[3].x), y: Math.round(nose[3].y) } : null,
     box: {
       x: Math.round(box.x),
       y: Math.round(box.y),
@@ -161,8 +169,20 @@ export async function analyzeFace(imageSource) {
 }
 
 /**
+ * Calculates Eye Aspect Ratio (EAR) from 6 landmark points of an eye.
+ */
+export function calculateEyeAspectRatio(eyeLandmarks) {
+  if (!eyeLandmarks || eyeLandmarks.length < 6) return 0.3;
+  const dV1 = Math.hypot(eyeLandmarks[1].x - eyeLandmarks[5].x, eyeLandmarks[1].y - eyeLandmarks[5].y);
+  const dV2 = Math.hypot(eyeLandmarks[2].x - eyeLandmarks[4].x, eyeLandmarks[2].y - eyeLandmarks[4].y);
+  const dH = Math.hypot(eyeLandmarks[0].x - eyeLandmarks[3].x, eyeLandmarks[0].y - eyeLandmarks[3].y);
+  if (dH <= 0) return 0.3;
+  return (dV1 + dV2) / (2.0 * dH);
+}
+
+/**
  * Calculates Euclidean distance between two 128-d vectors.
- * Distance < 0.58 indicates a match (same person).
+ * Distance < 0.40 indicates a match (same person).
  */
 export function calculateEuclideanDistance(vec1, vec2) {
   if (!vec1 || !vec2 || vec1.length !== vec2.length) return 1.0;
@@ -177,7 +197,7 @@ export function calculateEuclideanDistance(vec1, vec2) {
 /**
  * Verifies that 3 photo descriptors belong to the same person.
  */
-export function verifyThreePhotosSamePerson(descriptors, threshold = 0.58) {
+export function verifyThreePhotosSamePerson(descriptors, threshold = 0.40) {
   if (!descriptors || descriptors.length !== 3) {
     return {
       matches: false,
@@ -224,7 +244,7 @@ export function verifyThreePhotosSamePerson(descriptors, threshold = 0.58) {
 /**
  * Live identity matcher: compares live face descriptor against stored average descriptor.
  */
-export function verifyLiveMatch(liveDescriptor, storedAverageDescriptor, threshold = 0.58) {
+export function verifyLiveMatch(liveDescriptor, storedAverageDescriptor, threshold = 0.40) {
   if (!liveDescriptor || !storedAverageDescriptor) {
     return { matches: false, distance: 1.0, message: 'Descriptors missing for comparison' };
   }

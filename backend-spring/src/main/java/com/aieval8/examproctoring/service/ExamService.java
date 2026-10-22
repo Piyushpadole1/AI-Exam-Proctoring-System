@@ -126,7 +126,12 @@ public class ExamService {
         exam.setStatus("PUBLISHED");
 
         exam = examRepository.save(exam);
-        return new ExamResponse(exam);
+        ExamResponse resp = new ExamResponse(exam);
+        long count = questionRepository.countByExamId(exam.getId());
+        if (count > 0 || resp.getTotalQuestions() == null || resp.getTotalQuestions() == 0) {
+            resp.setTotalQuestions((int) count);
+        }
+        return resp;
     }
 
     public List<ExamResponse> getTeacherExams(CustomUserDetails teacherDetails) {
@@ -141,7 +146,14 @@ public class ExamService {
             return Collections.emptyList();
         }
         return examRepository.findByTeacherId(resolved.getId()).stream()
-                .map(ExamResponse::new)
+                .map(e -> {
+                    ExamResponse resp = new ExamResponse(e);
+                    long count = questionRepository.countByExamId(e.getId());
+                    if (count > 0 || resp.getTotalQuestions() == null || resp.getTotalQuestions() == 0) {
+                        resp.setTotalQuestions((int) count);
+                    }
+                    return resp;
+                })
                 .toList();
     }
 

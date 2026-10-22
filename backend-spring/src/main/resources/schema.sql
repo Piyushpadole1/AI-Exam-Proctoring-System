@@ -205,7 +205,7 @@ CREATE TABLE exam_attempts (
     integrity_score DOUBLE NOT NULL DEFAULT 100.0,
     termination_reason VARCHAR(255) NULL,
     fail_reason VARCHAR(255) NULL,
-    face_verification_status VARCHAR(30) DEFAULT 'VERIFIED',
+    face_verification_status VARCHAR(30) DEFAULT 'PENDING',
     face_mismatch_count INT NOT NULL DEFAULT 0,
     saved_answers LONGTEXT NULL,
     device_info TEXT NULL,
@@ -235,7 +235,7 @@ CREATE TABLE proctoring_sessions (
     hybrid_score DOUBLE NOT NULL DEFAULT 0.0,
     integrity_score DOUBLE NOT NULL DEFAULT 100.0,
     total_violations INT NOT NULL DEFAULT 0,
-    face_verification_status VARCHAR(30) DEFAULT 'VERIFIED',
+    face_verification_status VARCHAR(30) DEFAULT 'PENDING',
     consecutive_face_mismatches INT NOT NULL DEFAULT 0,
     total_face_mismatches INT NOT NULL DEFAULT 0,
     verdict VARCHAR(20) NOT NULL DEFAULT 'SAFE',
@@ -309,4 +309,33 @@ CREATE TABLE notifications (
     PRIMARY KEY (id),
     KEY idx_notifications_recipient (recipient_id, is_read, created_at),
     CONSTRAINT fk_notifications_recipient FOREIGN KEY (recipient_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+-- 12. Table: pre_exam_verifications
+-- Authoritative biometric gate records ensuring only verified students start exams
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pre_exam_verifications (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    student_id BIGINT NOT NULL,
+    exam_id BIGINT NOT NULL,
+    verified BIT(1) NOT NULL DEFAULT 0,
+    liveness_passed BIT(1) NOT NULL DEFAULT 0,
+    match_distance DOUBLE NULL,
+    threshold DOUBLE NOT NULL DEFAULT 0.40,
+    confidence DOUBLE NULL,
+    attempt_number INT NOT NULL DEFAULT 1,
+    failure_reason VARCHAR(255) NULL,
+    evidence_screenshot LONGTEXT NULL,
+    verification_token VARCHAR(64) NULL,
+    consumed BIT(1) NOT NULL DEFAULT 0,
+    consumed_at DATETIME(6) NULL,
+    verified_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    expires_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    KEY idx_pev_student_exam (student_id, exam_id),
+    KEY idx_pev_token (verification_token),
+    CONSTRAINT fk_pev_student FOREIGN KEY (student_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_pev_exam FOREIGN KEY (exam_id) REFERENCES exams (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

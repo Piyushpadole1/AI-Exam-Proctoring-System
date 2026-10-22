@@ -40,7 +40,7 @@ public class ProctoringSession {
     private Integer totalViolations = 0;
 
     @Column(name = "face_verification_status", length = 30)
-    private String faceVerificationStatus = "VERIFIED";
+    private String faceVerificationStatus = "PENDING";
 
     @Column(name = "consecutive_face_mismatches", nullable = false)
     private int consecutiveFaceMismatches = 0;

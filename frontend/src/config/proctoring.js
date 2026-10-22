@@ -16,7 +16,7 @@ const PROCTORING_CONFIG = {
   FACE_VERIFICATION: {
     ENABLED: true,
     INTERVAL_MS: 12000,                  // Continuous re-check every 12 seconds
-    MATCH_THRESHOLD: 0.58,              // Distance threshold (distance < 0.58 is match, >= 0.58 is mismatch)
+    MATCH_THRESHOLD: 0.40,              // Strict Euclidean distance threshold (distance < 0.40 is match, >= 0.40 is mismatch)
     MAX_CONSECUTIVE_MISMATCHES: 3,       // 3 mismatches in a row terminates exam
     PRE_EXAM_MAX_RETRY_ATTEMPTS: 3,     // Allowed live verification retries before exam start
     POINTS_DEDUCTED_PER_MISMATCH: 30,   // Point deduction per face mismatch

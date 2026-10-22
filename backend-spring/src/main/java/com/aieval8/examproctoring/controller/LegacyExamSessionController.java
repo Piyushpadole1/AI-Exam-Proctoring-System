@@ -95,6 +95,7 @@ public class LegacyExamSessionController {
     private final com.aieval8.examproctoring.service.CodeExecutionService codeExecutionService;
 
     private final com.aieval8.examproctoring.service.NotificationService notificationService;
+    private final PreExamVerificationRepository preExamVerificationRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -126,9 +127,9 @@ public class LegacyExamSessionController {
 
                                         org.springframework.security.crypto.password.PasswordEncoder passwordEncoder,
 
-                                        com.aieval8.examproctoring.service.CodeExecutionService codeExecutionService,
-
-                                        com.aieval8.examproctoring.service.NotificationService notificationService) {
+                                                                                 com.aieval8.examproctoring.service.CodeExecutionService codeExecutionService,
+                                         com.aieval8.examproctoring.service.NotificationService notificationService,
+                                         PreExamVerificationRepository preExamVerificationRepository) {
 
         this.examService = examService;
 
@@ -159,6 +160,7 @@ public class LegacyExamSessionController {
         this.codeExecutionService = codeExecutionService;
 
         this.notificationService = notificationService;
+        this.preExamVerificationRepository = preExamVerificationRepository;
 
     }
 
@@ -310,7 +312,10 @@ public class LegacyExamSessionController {
 
             map.put("duration", e.getDurationMinutes());
 
-            map.put("totalQuestions", e.getTotalQuestions());
+            long actualMcqCount = questionRepository.countByExamId(e.getId());
+            int totalQ = actualMcqCount > 0 ? (int) actualMcqCount : (e.getTotalQuestions() != null ? e.getTotalQuestions() : 0);
+            map.put("totalQuestions", totalQ);
+            map.put("mcqCount", (int) actualMcqCount);
 
             map.put("totalMarks", e.getTotalMarks());
 
@@ -446,7 +451,10 @@ public class LegacyExamSessionController {
 
         map.put("duration", e.getDurationMinutes());
 
-        map.put("totalQuestions", e.getTotalQuestions());
+        long actualMcqCount = questionRepository.countByExamId(e.getId());
+        int totalQ = actualMcqCount > 0 ? (int) actualMcqCount : (e.getTotalQuestions() != null ? e.getTotalQuestions() : 0);
+        map.put("totalQuestions", totalQ);
+        map.put("mcqCount", (int) actualMcqCount);
 
         map.put("totalMarks", e.getTotalMarks());
 
@@ -899,15 +907,25 @@ public class LegacyExamSessionController {
             }
 
         } else if (isStudent) {
-
             Optional<ExamEnrollment> enOpt = enrollmentRepository.findByExamIdAndStudentId(exam.getId(), resolved.getId());
-
             if (enOpt.isEmpty() || enOpt.get().getStatus() != EnrollmentStatus.ENROLLED) {
-
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: You must be enrolled and approved to access questions."));
-
             }
 
+            boolean hasActiveAttempt = attemptRepository
+                    .findFirstByExamIdAndStudentIdAndStatus(exam.getId(), resolved.getId(), AttemptStatus.IN_PROGRESS)
+                    .isPresent();
+
+            boolean hasVerifiedPreExam = preExamVerificationRepository
+                    .findTopByStudentIdAndExamIdAndVerifiedTrueAndExpiresAtAfterOrderByVerifiedAtDesc(
+                            resolved.getId(), exam.getId(), LocalDateTime.now())
+                    .isPresent();
+
+            if (!hasActiveAttempt && !hasVerifiedPreExam) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "error", "Access denied: Pre-exam biometric face identity verification must be completed before accessing exam questions."
+                ));
+            }
         }
 
 
@@ -946,30 +964,20 @@ public class LegacyExamSessionController {
 
                         String optText = "";
 
-                        boolean isCor = (i == q.getCorrectOptionIndex());
-
-
+                        boolean isCor = false;
+                        if (q.getCorrectOptionIndex() != null && q.getCorrectOptionIndex() >= 0) {
+                            isCor = (i == q.getCorrectOptionIndex().intValue());
+                        } else if (item instanceof Map<?, ?> m && m.get("isCorrect") != null) {
+                            isCor = Boolean.TRUE.equals(m.get("isCorrect")) || "true".equalsIgnoreCase(m.get("isCorrect").toString());
+                        }
 
                         if (item instanceof Map<?, ?> m) {
-
                             Object t = m.get("optionText");
-
                             if (t == null) t = m.get("text");
-
                             if (t == null) t = m.get("option");
-
                             optText = t != null ? t.toString() : "";
-
-                            if (m.get("isCorrect") != null) {
-
-                                isCor = Boolean.TRUE.equals(m.get("isCorrect")) || "true".equalsIgnoreCase(m.get("isCorrect").toString());
-
-                            }
-
                         } else if (item != null) {
-
                             optText = item.toString();
-
                         }
 
 
@@ -1065,13 +1073,9 @@ public class LegacyExamSessionController {
 
 
         long currentCount = questionRepository.countByExamId(exam.getId());
-
-        int maxAllowed = exam.getTotalQuestions() != null ? exam.getTotalQuestions() : 0;
-
-        if (maxAllowed > 0 && currentCount >= maxAllowed) {
-
-            return ResponseEntity.badRequest().body(Map.of("error", "Cannot add question: Exam question capacity (" + maxAllowed + ") has been reached."));
-
+        if (exam.getTotalQuestions() == null || currentCount >= exam.getTotalQuestions()) {
+            exam.setTotalQuestions((int) currentCount + 1);
+            examRepository.save(exam);
         }
 
 
@@ -1107,47 +1111,45 @@ public class LegacyExamSessionController {
 
 
         String optionsJson = "[]";
-
         int correctIndex = 0;
-
         if (body.get("correctOptionIndex") != null) {
-
             try {
-
                 correctIndex = Integer.parseInt(body.get("correctOptionIndex").toString());
-
             } catch (Exception ignored) {}
-
         } else if (optionsObj instanceof List<?> list) {
-
             for (int i = 0; i < list.size(); i++) {
-
                 Object item = list.get(i);
-
                 if (item instanceof Map<?, ?> m) {
-
                     Object isCor = m.get("isCorrect");
-
                     if (Boolean.TRUE.equals(isCor) || "true".equalsIgnoreCase(String.valueOf(isCor))) {
-
                         correctIndex = i;
-
                         break;
-
                     }
-
                 }
-
             }
+        }
 
+        List<Map<String, Object>> normalizedOptionsList = new ArrayList<>();
+        if (optionsObj instanceof List<?> list) {
+            for (int i = 0; i < list.size(); i++) {
+                Object item = list.get(i);
+                Map<String, Object> mCopy = new HashMap<>();
+                if (item instanceof Map<?, ?> m) {
+                    for (Map.Entry<?, ?> e : m.entrySet()) {
+                        mCopy.put(String.valueOf(e.getKey()), e.getValue());
+                    }
+                } else if (item != null) {
+                    mCopy.put("option", item.toString());
+                    mCopy.put("text", item.toString());
+                }
+                mCopy.put("isCorrect", (i == correctIndex));
+                normalizedOptionsList.add(mCopy);
+            }
         }
 
         try {
-
-            optionsJson = objectMapper.writeValueAsString(optionsObj != null ? optionsObj : Collections.emptyList());
-
+            optionsJson = objectMapper.writeValueAsString(!normalizedOptionsList.isEmpty() ? normalizedOptionsList : (optionsObj != null ? optionsObj : Collections.emptyList()));
         } catch (JsonProcessingException ignored) {
-
         }
 
 
@@ -1165,6 +1167,10 @@ public class LegacyExamSessionController {
         Question q = new Question(exam, questionText, optionsJson, correctIndex, marks);
 
         q = questionRepository.save(q);
+
+        long newCount = questionRepository.countByExamId(exam.getId());
+        exam.setTotalQuestions(Math.max((int) newCount, exam.getTotalQuestions() != null ? exam.getTotalQuestions() : 0));
+        examRepository.save(exam);
 
 
 
@@ -1239,19 +1245,60 @@ public class LegacyExamSessionController {
         }
 
         if (body.get("question") != null) q.setQuestionText((String) body.get("question"));
+        if (body.get("questionText") != null) q.setQuestionText((String) body.get("questionText"));
 
-        if (body.get("options") != null) {
-
+        int correctIndex = q.getCorrectOptionIndex() != null ? q.getCorrectOptionIndex() : 0;
+        if (body.get("correctOptionIndex") != null) {
             try {
-
-                q.setOptionsJson(objectMapper.writeValueAsString(body.get("options")));
-
+                correctIndex = Integer.parseInt(body.get("correctOptionIndex").toString());
             } catch (Exception ignored) {}
-
         }
 
-        if (body.get("marks") instanceof Number num) q.setMarks(num.doubleValue());
+        Object optsObj = body.get("options");
+        if (optsObj == null) optsObj = body.get("optionsJson");
+        if (optsObj instanceof String) {
+            try {
+                optsObj = objectMapper.readValue((String) optsObj, List.class);
+            } catch (Exception ignored) {}
+        }
 
+        if (optsObj instanceof List<?> list) {
+            if (body.get("correctOptionIndex") == null) {
+                for (int i = 0; i < list.size(); i++) {
+                    Object item = list.get(i);
+                    if (item instanceof Map<?, ?> m) {
+                        Object isCor = m.get("isCorrect");
+                        if (Boolean.TRUE.equals(isCor) || "true".equalsIgnoreCase(String.valueOf(isCor))) {
+                            correctIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            List<Map<String, Object>> normalized = new ArrayList<>();
+            for (int i = 0; i < list.size(); i++) {
+                Object item = list.get(i);
+                Map<String, Object> mCopy = new HashMap<>();
+                if (item instanceof Map<?, ?> m) {
+                    for (Map.Entry<?, ?> e : m.entrySet()) {
+                        mCopy.put(String.valueOf(e.getKey()), e.getValue());
+                    }
+                } else if (item != null) {
+                    mCopy.put("option", item.toString());
+                    mCopy.put("text", item.toString());
+                }
+                mCopy.put("isCorrect", (i == correctIndex));
+                normalized.add(mCopy);
+            }
+            try {
+                q.setOptionsJson(objectMapper.writeValueAsString(normalized));
+            } catch (Exception ignored) {}
+        }
+
+        q.setCorrectOptionIndex(correctIndex);
+
+        if (body.get("marks") instanceof Number num) q.setMarks(num.doubleValue());
         questionRepository.save(q);
 
         return ResponseEntity.ok(Map.of("success", true, "message", "Question updated"));
@@ -1302,12 +1349,10 @@ public class LegacyExamSessionController {
 
         questionRepository.delete(q);
 
-        if (exam != null && exam.getTotalQuestions() > 0) {
-
-            exam.setTotalQuestions(exam.getTotalQuestions() - 1);
-
+        if (exam != null) {
+            long newCount = questionRepository.countByExamId(exam.getId());
+            exam.setTotalQuestions((int) newCount);
             examRepository.save(exam);
-
         }
 
         return ResponseEntity.ok(Map.of("success", true, "message", "Question deleted"));
@@ -2805,33 +2850,21 @@ public class LegacyExamSessionController {
 
 
                 // 1. Direct index matching (0-based)
-
                 try {
-
                     int selIdx = Integer.parseInt(cleanAns);
-
                     if (selIdx >= 0 && selIdx < opts.size()) {
-
                         studentAnsDisplay = (String) opts.get(selIdx).get("text");
-
+                        if (selIdx == q.getCorrectOptionIndex()) {
+                            isCorrect = true;
+                        }
                     } else if (selIdx > 0 && (selIdx - 1) < opts.size()) {
-
                         studentAnsDisplay = (String) opts.get(selIdx - 1).get("text");
-
+                        if ((selIdx - 1) == q.getCorrectOptionIndex()) {
+                            isCorrect = true;
+                        }
                     } else {
-
                         studentAnsDisplay = cleanAns;
-
                     }
-
-
-
-                    if (selIdx == q.getCorrectOptionIndex() || selIdx == (q.getCorrectOptionIndex() + 1)) {
-
-                        isCorrect = true;
-
-                    }
-
                 } catch (NumberFormatException ignored) {}
 
 

@@ -97,7 +97,6 @@ export default function MultipleChoiceQuestion({
     const updated = {
       ...answers,
       [qKey]: val,
-      [String(currentQuestion)]: val,
     };
     if (setAnswers) {
       setAnswers(updated);
