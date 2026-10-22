@@ -67,6 +67,17 @@ export default function WebCam({ onViolation, webcamRef }) {
   const noFaceStartRef = useRef(null);
   const multiFaceStartRef = useRef(null);
   const lookAwayStartRef = useRef(null);
+  const headTurnedAwayStartRef = useRef(null);
+
+  // Real-time head orientation state for gating continuous face identity verification
+  const currentHeadPoseRef = useRef({
+    isFrontal: false,
+    isLookingAway: false,
+    isLookingDown: false,
+    isYawExceeded: false,
+    isPitchExceeded: false,
+    lastUpdated: 0,
+  });
 
   const handleDetection = (type, customDescription = null) => {
     // Looking down (keyboard, desk, writing): Strictly ZERO penalty, ZERO warning, ZERO siren
@@ -377,16 +388,34 @@ export default function WebCam({ onViolation, webcamRef }) {
             return;
           }
 
+          // Strict Frontal Pose Guard:
+          // ONLY run biometric identity comparison when the student is facing the screen frontally!
+          // If the student is moving their head, turned away, tilted, or looking away, DO NOT run identity verification!
+          const pose = currentHeadPoseRef.current;
+          if (!pose || !pose.isFrontal) {
+            return;
+          }
+
           const video = actualWebcamRef.current.video;
           try {
             faceCheckInProgressRef.current = true;
             const analysis = await analyzeFace(video);
+
+            // Double check pose didn't change while frame was capturing
+            if (!currentHeadPoseRef.current?.isFrontal) {
+              return;
+            }
+
             // Only evaluate when exactly one face is detected with good visibility
             if (analysis && analysis.success && analysis.descriptor) {
+              const threshold =
+                PROCTORING_CONFIG.FACE_VERIFICATION.CONTINUOUS_MATCH_THRESHOLD ||
+                PROCTORING_CONFIG.FACE_VERIFICATION.MATCH_THRESHOLD ||
+                0.52;
               const matchResult = verifyLiveMatch(
                 analysis.descriptor,
                 storedFaceEmbeddingRef.current,
-                PROCTORING_CONFIG.FACE_VERIFICATION.MATCH_THRESHOLD || 0.58
+                threshold
               );
 
               if (matchResult.matches) {
@@ -499,6 +528,28 @@ export default function WebCam({ onViolation, webcamRef }) {
         }
       } else {
         noFaceStartRef.current = null;
+      }
+
+      // Head turned completely away: Person is present in chair (personCount >= 1), but no frontal face detected
+      if (personCount >= 1 && detectedFaces.length === 0) {
+        if (!headTurnedAwayStartRef.current) {
+          headTurnedAwayStartRef.current = now;
+        } else if (now - headTurnedAwayStartRef.current >= (PROCTORING_CONFIG.SUSTAINED_DURATIONS.HEAD_MOVEMENT || 1000)) {
+          handleDetection('HEAD_MOVEMENT', 'Head movement: Head turned away from camera view');
+        }
+      } else {
+        headTurnedAwayStartRef.current = null;
+      }
+
+      if (detectedFaces.length === 0) {
+        currentHeadPoseRef.current = {
+          isFrontal: false,
+          isLookingAway: personCount >= 1,
+          isLookingDown: false,
+          isYawExceeded: false,
+          isPitchExceeded: false,
+          lastUpdated: now,
+        };
       }
 
       // Visual feedback banner for 0 or >1 faces
@@ -837,7 +888,7 @@ export default function WebCam({ onViolation, webcamRef }) {
         }
 
         // ── 2c. Looking-Away Timers ──────────────────────────────────────
-        const sustainedLookAwayMs = PROCTORING_CONFIG.SUSTAINED_DURATIONS.PROLONGED_LOOKING_AWAY || 1200;
+        const sustainedLookAwayMs = PROCTORING_CONFIG.SUSTAINED_DURATIONS.HEAD_MOVEMENT || 1000;
         let lookAwayElapsedMs = 0;
 
         if (isLookingAwayOther) {
@@ -847,20 +898,28 @@ export default function WebCam({ onViolation, webcamRef }) {
           }
           lookAwayElapsedMs = now - lookAwayStartRef.current;
 
-          // Sustained look-away duration confirmed (~1.2s of looking left, right, or up)
+          // Sustained look-away duration confirmed (~1.0s of looking left, right, or up)
           if (lookAwayElapsedMs >= sustainedLookAwayMs) {
-            let violationType = 'HEAD_MOVEMENT';
-            let desc = 'Head turned away from screen';
+            let violationType = isYawExceeded ? 'HEAD_MOVEMENT' : (isPitchUp ? 'HEAD_MOVEMENT' : 'EYE_GAZE');
+            let desc = isYawExceeded
+              ? 'Head movement: Head turned away from screen'
+              : 'Eye gaze: Looking away from screen';
 
             if (activeDirection === 'LEFT') {
               violationType = isYawExceeded ? 'HEAD_MOVEMENT' : 'EYE_GAZE';
-              desc = 'Looking left: Head or eyes turned away from screen';
+              desc = isYawExceeded
+                ? 'Head movement: Head turned left away from screen'
+                : 'Eye gaze: Looking left away from screen';
             } else if (activeDirection === 'RIGHT') {
               violationType = isYawExceeded ? 'HEAD_MOVEMENT' : 'EYE_GAZE';
-              desc = 'Looking right: Head or eyes turned away from screen';
+              desc = isYawExceeded
+                ? 'Head movement: Head turned right away from screen'
+                : 'Eye gaze: Looking right away from screen';
             } else if (activeDirection === 'UP') {
               violationType = isPitchUp ? 'HEAD_MOVEMENT' : 'EYE_GAZE';
-              desc = 'Looking up: Head or eyes tilted upward away from screen';
+              desc = isPitchUp
+                ? 'Head movement: Head tilted upward away from screen'
+                : 'Eye gaze: Looking upward away from screen';
             }
 
             handleDetection(violationType, desc);
@@ -873,6 +932,22 @@ export default function WebCam({ onViolation, webcamRef }) {
           // Student is looking straight at the screen: Immediately reset timer
           lookAwayStartRef.current = null;
         }
+
+        // Update current head pose ref for continuous verification gating
+        currentHeadPoseRef.current = {
+          isFrontal:
+            !isLookingAwayOther &&
+            !isLookingDown &&
+            !isYawExceeded &&
+            !isPitchUp &&
+            currentYawDev < (yawThreshold * 0.9) &&
+            currentPitchDev < (pitchThreshold * 0.9),
+          isLookingAway: isLookingAwayOther,
+          isLookingDown,
+          isYawExceeded,
+          isPitchExceeded: isPitchUp || isPitchDown,
+          lastUpdated: now,
+        };
 
         // ── 2d. Real-Time HUD Overlay on Canvas ───────────────────────────
         if (canvasRef.current) {

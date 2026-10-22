@@ -16,7 +16,8 @@ const PROCTORING_CONFIG = {
   FACE_VERIFICATION: {
     ENABLED: true,
     INTERVAL_MS: 12000,                  // Continuous re-check every 12 seconds
-    MATCH_THRESHOLD: 0.40,              // Strict Euclidean distance threshold (distance < 0.40 is match, >= 0.40 is mismatch)
+    MATCH_THRESHOLD: 0.40,              // Strict Euclidean distance threshold for pre-exam registration/gate
+    CONTINUOUS_MATCH_THRESHOLD: 0.52,   // Background continuous check threshold for live webcam stream (frontal faces only)
     MAX_CONSECUTIVE_MISMATCHES: 3,       // 3 mismatches in a row terminates exam
     PRE_EXAM_MAX_RETRY_ATTEMPTS: 3,     // Allowed live verification retries before exam start
     POINTS_DEDUCTED_PER_MISMATCH: 30,   // Point deduction per face mismatch
@@ -25,11 +26,11 @@ const PROCTORING_CONFIG = {
 
   // Sustained Detection Durations (ms) - condition confirmation before firing look-away/anomalies
   SUSTAINED_DURATIONS: {
-    HEAD_MOVEMENT: 1200,           // Head turn/tilt confirmed in ~1.2 seconds
-    HEAD_TURNED: 1200,
+    HEAD_MOVEMENT: 1000,           // Head turn/tilt confirmed in 1.0 second
+    HEAD_TURNED: 1000,
     EYE_GAZE: 1200,                // Eyes looking away confirmed in ~1.2 seconds
     EYE_GAZE_AWAY: 1200,
-    PROLONGED_LOOKING_AWAY: 1200,  // Continuous looking away confirmed in ~1.2 seconds
+    PROLONGED_LOOKING_AWAY: 1000,  // Continuous looking away confirmed in 1.0 second
     DOWNWARD_GAZE_MAX: 0,          // Downward gaze never flags a violation (fully allowed)
     FACE_MISMATCH: 500,            // Face identity mismatch confirmed in ~500ms
     NO_FACE: 1000,                 // No person in frame confirmed in 1.0s

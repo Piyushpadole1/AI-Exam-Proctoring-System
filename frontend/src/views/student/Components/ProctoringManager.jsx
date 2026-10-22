@@ -24,13 +24,14 @@ import {
   Shield as ShieldIcon,
   Fullscreen as FullscreenIcon,
   Visibility as VisibilityIcon,
+  VolumeUp as VolumeUpIcon,
 } from '@mui/icons-material';
 import BrowserMonitor from './BrowserMonitor';
 import AudioMonitor from './AudioMonitor';
 import WebCam from './WebCam';
 import axiosInstance from '../../../axios';
 import PROCTORING_CONFIG from '../../../config/proctoring';
-import { playSiren } from '../../../utils/siren';
+import { playSiren, unlockAudio } from '../../../utils/siren';
 import { toast } from 'react-toastify';
 
 export default function ProctoringManager({
@@ -253,6 +254,7 @@ export default function ProctoringManager({
   );
 
   useEffect(() => {
+    unlockAudio();
     window.__uploadProctoringEvidence = uploadEvidence;
     window.__terminateExamSession = terminateSession;
     return () => {
@@ -350,8 +352,7 @@ export default function ProctoringManager({
   // ── Handle Violations from WebCam, BrowserMonitor, AudioMonitor ──
   const handleViolation = useCallback(
     async (violation) => {
-      const activeSessionId = sessionIdRef.current || sessionId;
-      if (!activeSessionId || !isActiveRef.current || isTerminatedRef.current) return;
+      if (isTerminatedRef.current) return;
 
       const eventType = violation.eventType || '';
 
@@ -416,10 +417,11 @@ export default function ProctoringManager({
       if (isHeadGaze) {
         const freeLimit = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_FREE_WARNINGS || 10;
         const penalty = PROCTORING_CONFIG.INTEGRITY_SYSTEM.DEDUCTIONS.HEAD_GAZE_PENALTY_POINTS || 5;
+        const violationLabel = eventType.includes('HEAD') ? 'Head Movement Warning' : 'Looking Away Warning';
         if (nextHeadGaze <= freeLimit) {
-          displayMsg = `⚠️ Warning ${nextHeadGaze} of ${freeLimit}: ${violation.description || 'Looking away from screen'}`;
+          displayMsg = `⚠️ ${violationLabel} (${nextHeadGaze} of ${freeLimit}): ${violation.description || 'Head turned away from screen'}`;
         } else {
-          displayMsg = `🚨 Warning ${nextHeadGaze}: Looking away penalty! (${penalty} points deducted)`;
+          displayMsg = `🚨 ${violationLabel} (${nextHeadGaze}): Penalty applied! (${penalty} points deducted)`;
         }
       } else if (eventType.includes('MISMATCH') || eventType.includes('UNAUTHORIZED')) {
         displayMsg = `🚨 Face Mismatch: ${violation.description || 'Unrecognized face detected'} (-${localDeduction} points deducted)`;
@@ -445,36 +447,39 @@ export default function ProctoringManager({
           : 'v_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9));
 
       // 5. Send lightweight violation event first (< 10ms) without heavy screenshot
-      const lightweightPayload = {
-        violationId,
-        sessionId: activeSessionId,
-        eventType: violation.eventType,
-        confidence: violation.confidence || 1.0,
-        description: violation.description || displayMsg,
-        evidenceUrl: null,
-        metadata: {
-          ...violation.metadata,
-          warningNumber: isHeadGaze ? nextHeadGaze : null,
-          fullscreenStrike: isFullscreen ? nextFullscreen : null,
-        },
-      };
+      const activeSessionId = sessionIdRef.current || sessionId;
+      if (activeSessionId) {
+        const lightweightPayload = {
+          violationId,
+          sessionId: activeSessionId,
+          eventType: violation.eventType,
+          confidence: violation.confidence || 1.0,
+          description: violation.description || displayMsg,
+          evidenceUrl: null,
+          metadata: {
+            ...violation.metadata,
+            warningNumber: isHeadGaze ? nextHeadGaze : null,
+            fullscreenStrike: isFullscreen ? nextFullscreen : null,
+          },
+        };
 
-      // Dispatch immediately over WebSocket (with HTTP fallback and offline queue)
-      dispatchReport(lightweightPayload);
+        // Dispatch immediately over WebSocket (with HTTP fallback and offline queue)
+        dispatchReport(lightweightPayload);
 
-      // 6. Decoupled evidence upload: if screenshot is available or can be captured, send in background
-      const rawScreenshot = violation.evidenceUrl || violation.screenshot;
-      if (rawScreenshot) {
-        setTimeout(() => {
-          uploadEvidence(violationId, rawScreenshot);
-        }, 30);
-      } else if (typeof violation.captureScreenshot === 'function') {
-        setTimeout(() => {
-          try {
-            const sc = violation.captureScreenshot();
-            if (sc) uploadEvidence(violationId, sc);
-          } catch (_) {}
-        }, 30);
+        // 6. Decoupled evidence upload: if screenshot is available or can be captured, send in background
+        const rawScreenshot = violation.evidenceUrl || violation.screenshot;
+        if (rawScreenshot) {
+          setTimeout(() => {
+            uploadEvidence(violationId, rawScreenshot);
+          }, 30);
+        } else if (typeof violation.captureScreenshot === 'function') {
+          setTimeout(() => {
+            try {
+              const sc = violation.captureScreenshot();
+              if (sc) uploadEvidence(violationId, sc);
+            } catch (_) {}
+          }, 30);
+        }
       }
 
       // Check local immediate disqualification conditions
@@ -543,6 +548,19 @@ export default function ProctoringManager({
             color={getScoreColor()}
             size="small"
             variant="outlined"
+          />
+          <Chip
+            icon={<VolumeUpIcon />}
+            label="Test Siren"
+            onClick={() => {
+              unlockAudio();
+              playSiren();
+            }}
+            clickable
+            size="small"
+            color="secondary"
+            variant="outlined"
+            sx={{ fontWeight: 'bold', cursor: 'pointer' }}
           />
         </Stack>
 

@@ -19,6 +19,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 import axiosInstance from '../../../axios';
 import { loadFaceApiModels, analyzeFace } from '../../../utils/faceRecognition';
+import { unlockAudio } from '../../../utils/siren';
 import PROCTORING_CONFIG from '../../../config/proctoring';
 
 const MAX_ATTEMPTS = PROCTORING_CONFIG.FACE_VERIFICATION?.PRE_EXAM_MAX_RETRY_ATTEMPTS || 3;
@@ -68,6 +69,7 @@ const PreExamFaceGate = ({ studentName, studentId, examId, onVerified, onFailed,
   }, []);
 
   const handleCaptureAndVerify = useCallback(async () => {
+    unlockAudio();
     if (!webcamRef.current) return;
     const video = webcamRef.current.video;
     if (!video || video.readyState < 2) {

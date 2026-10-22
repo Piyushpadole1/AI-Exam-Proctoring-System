@@ -226,39 +226,67 @@ const ProctoringReport = () => {
             <DashboardCard title="Exam Result">
               <Box p={2}>
                 {result ? (
-                  <Grid container spacing={1}>
-                    <Grid item xs={6}>
+                  <Box>
+                    <TableContainer sx={{ mb: 1.5, border: '1px solid #e0e0e0', borderRadius: 1 }}>
+                      <Table size="small">
+                        <TableHead sx={{ bgcolor: 'grey.100' }}>
+                          <TableRow>
+                            <TableCell align="center"><strong>Actual score of student</strong></TableCell>
+                            <TableCell align="center"><strong>Integrity score</strong></TableCell>
+                            <TableCell align="center"><strong>Final score after the deduction</strong></TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          <TableRow>
+                            <TableCell align="center">
+                              <Typography variant="h6" fontWeight="bold" color="primary.main">
+                                {result.actualScore ?? result.score ?? 0} / {result.totalMarks}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="center">
+                              <Typography
+                                variant="h6"
+                                fontWeight="bold"
+                                color={
+                                  (proctoring.integrityScore ?? proctoring.fairnessScore ?? 100) >= 70
+                                    ? 'success.main'
+                                    : 'error.main'
+                                }
+                              >
+                                {proctoring.integrityScore ?? proctoring.fairnessScore ?? 100} / 100
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="center">
+                              <Typography
+                                variant="h6"
+                                fontWeight="bold"
+                                color={result.passed ? 'success.dark' : 'error.main'}
+                              >
+                                {result.finalScore ?? result.score ?? 0}
+                              </Typography>
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+
+                    <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} mb={1}>
                       <Typography variant="body2" color="textSecondary">
-                        MCQ Score
+                        Points deducted: <strong>{result.pointsDeducted ?? Math.max(0, 100 - (proctoring.integrityScore ?? 100))}</strong> | Academic reduction: <strong>{result.reductionPercentage ?? 0}%</strong>
                       </Typography>
-                      <Typography variant="h5" fontWeight="bold">
-                        {result.percentage?.toFixed(1)}%
+                      <Chip
+                        label={result.passed ? 'PASSED' : (session?.status === 'TERMINATED' || result.status === 'DISQUALIFIED' ? 'DISQUALIFIED' : 'FAILED')}
+                        color={result.passed ? 'success' : 'error'}
+                        size="small"
+                        sx={{ fontWeight: 'bold' }}
+                      />
+                    </Box>
+                    {!result.passed && (
+                      <Typography variant="body2" color="error.main" fontWeight={600} mt={0.5}>
+                        {result.failReason || (session?.status === 'TERMINATED' || result.status === 'DISQUALIFIED' ? 'Failed: exam terminated due to violations.' : 'Failed: marks below passing score.')}
                       </Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="textSecondary">
-                        Total Marks
-                      </Typography>
-                      <Typography variant="h5" fontWeight="bold">
-                        {result.totalMarks}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12} mt={1}>
-                      <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
-                        <Chip
-                          label={result.passed ? 'PASSED' : (session?.status === 'TERMINATED' || result.status === 'DISQUALIFIED' ? 'DISQUALIFIED' : 'FAILED')}
-                          color={result.passed ? 'success' : 'error'}
-                          size="small"
-                          sx={{ fontWeight: 'bold' }}
-                        />
-                        {!result.passed && (
-                          <Typography variant="body2" color="error.main" fontWeight={600}>
-                            {result.failReason || (session?.status === 'TERMINATED' || result.status === 'DISQUALIFIED' ? 'Failed: exam terminated due to violations.' : 'Failed: marks below passing score.')}
-                          </Typography>
-                        )}
-                      </Box>
-                    </Grid>
-                  </Grid>
+                    )}
+                  </Box>
                 ) : (
                   <Typography color="textSecondary">Result not yet calculated</Typography>
                 )}

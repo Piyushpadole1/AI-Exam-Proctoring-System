@@ -1,6 +1,8 @@
 package com.aieval8.examproctoring.service;
 
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -11,6 +13,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 @Service
 public class ProctoringStreamService {
+    private static final Logger log = LoggerFactory.getLogger(ProctoringStreamService.class);
 
     // Teacher ID -> Active SSE Emitters
     private final Map<Long, List<SseEmitter>> teacherEmitters = new ConcurrentHashMap<>();
@@ -82,7 +85,9 @@ public class ProctoringStreamService {
         for (java.util.function.Consumer<Map<String, Object>> listener : telemetryListeners) {
             try {
                 listener.accept(payload);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                log.warn("Telemetry listener dispatch failed: {}", e.getMessage());
+            }
         }
 
         // Dispatch to teacher SSE subscribers

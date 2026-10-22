@@ -295,6 +295,13 @@ const TeacherExamsPage = () => {
       return;
     }
 
+    // Check Question Limit
+    const maxQuestionsAllowed = Number(selectedExamForQuestions?.totalQuestions || 0);
+    if (!editingQuestion && maxQuestionsAllowed > 0 && examQuestions.length >= maxQuestionsAllowed) {
+      toast.error(`Cannot add question: Exam has reached its maximum limit of ${maxQuestionsAllowed} questions. Delete a question or increase the question limit in exam settings.`);
+      return;
+    }
+
     // Check Total Marks allocation
     const examTotalMarks = Number(selectedExamForQuestions?.totalMarks || 100);
     const codingMarksAllocated = selectedExamForQuestions?.hasCodingRound ? Number(selectedExamForQuestions?.codingMarks || 20) : 0;
@@ -348,7 +355,7 @@ const TeacherExamsPage = () => {
       fetchExams();
     } catch (err) {
       console.error('Failed to save question:', err);
-      toast.error('Failed to save question');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Failed to save question');
     }
   };
 
@@ -753,13 +760,29 @@ const TeacherExamsPage = () => {
           maxWidth="md"
           fullWidth
         >
-          <DialogTitle sx={{ fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Manage Questions: {selectedExamForQuestions?.examName}</span>
+          <DialogTitle sx={{ fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+            <Box display="flex" alignItems="center" gap={1.5}>
+              <span>Manage Questions: {selectedExamForQuestions?.examName}</span>
+              {Number(selectedExamForQuestions?.totalQuestions || 0) > 0 && (
+                <Chip
+                  label={`${examQuestions.length} of ${selectedExamForQuestions.totalQuestions} Questions`}
+                  color={examQuestions.length >= Number(selectedExamForQuestions.totalQuestions) ? 'error' : 'primary'}
+                  size="small"
+                  sx={{ fontWeight: 'bold' }}
+                />
+              )}
+            </Box>
             <Button
               variant="contained"
               size="small"
               startIcon={<AddIcon />}
+              disabled={Number(selectedExamForQuestions?.totalQuestions || 0) > 0 && examQuestions.length >= Number(selectedExamForQuestions.totalQuestions)}
               onClick={() => {
+                const maxQ = Number(selectedExamForQuestions?.totalQuestions || 0);
+                if (maxQ > 0 && examQuestions.length >= maxQ) {
+                  toast.warning(`Question limit reached (${maxQ} max). Delete an existing question or increase the limit in exam settings.`);
+                  return;
+                }
                 setEditingQuestion(null);
                 setQuestionFormData({
                   question: '',
@@ -778,6 +801,13 @@ const TeacherExamsPage = () => {
             </Button>
           </DialogTitle>
           <DialogContent dividers>
+            {/* Question Limit Banner */}
+            {Number(selectedExamForQuestions?.totalQuestions || 0) > 0 && examQuestions.length >= Number(selectedExamForQuestions.totalQuestions) && (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                <strong>Maximum Question Limit Reached:</strong> All {selectedExamForQuestions.totalQuestions} questions have been added to this exam. You cannot add more questions unless you delete an existing question or edit the exam settings to increase the total questions limit.
+              </Alert>
+            )}
+
             {/* Running Sum Allocation Banner */}
             {(() => {
               const mcqMarksSum = examQuestions.reduce((sum, q) => sum + Number(q.marks || 1), 0);

@@ -10,6 +10,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
@@ -20,6 +22,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/proctoring")
 public class ProctoringController {
+    private static final Logger log = LoggerFactory.getLogger(ProctoringController.class);
 
     private final ProctoringService proctoringService;
     private final ProctoringStreamService streamService;
@@ -42,7 +45,10 @@ public class ProctoringController {
                     return ResponseEntity.ok(response);
                 } catch (org.springframework.dao.ConcurrencyFailureException ex) {
                     if (attempt == 2) throw ex;
-                    try { Thread.sleep(25L * (attempt + 1)); } catch (InterruptedException ignored) {}
+                    try { Thread.sleep(25L * (attempt + 1)); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        log.warn("Interrupted backoff retry: {}", ie.getMessage());
+                    }
                 }
             }
             ViolationResponse response = proctoringService.logViolation(request, studentDetails);

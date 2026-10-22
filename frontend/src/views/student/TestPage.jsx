@@ -25,6 +25,7 @@ import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 
 import axiosInstance from '../../axios';
+import { unlockAudio } from '../../utils/siren';
 
 
 
@@ -77,6 +78,8 @@ const TestPage = () => {
   const requestPermissions = async () => {
 
     try {
+
+      unlockAudio();
 
       setPermissionsError('');
 

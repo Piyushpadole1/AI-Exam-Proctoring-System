@@ -44,7 +44,7 @@ const AddQuestionForm = () => {
   );
   const maxQuestions = selectedExam?.totalQuestions || 0;
   const currentCount = questions.length;
-  const isCapacityReached = false; // Teachers can always add questions to expand exams
+  const isCapacityReached = maxQuestions > 0 && currentCount >= maxQuestions;
 
   // Pre-select first exam when available
   useEffect(() => {

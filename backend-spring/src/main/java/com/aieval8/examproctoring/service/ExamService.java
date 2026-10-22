@@ -11,6 +11,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
@@ -19,6 +21,7 @@ import java.util.Optional;
 
 @Service
 public class ExamService {
+    private static final Logger log = LoggerFactory.getLogger(ExamService.class);
 
     private final ExamRepository examRepository;
     private final UserRepository userRepository;
@@ -128,7 +131,7 @@ public class ExamService {
         exam = examRepository.save(exam);
         ExamResponse resp = new ExamResponse(exam);
         long count = questionRepository.countByExamId(exam.getId());
-        if (count > 0 || resp.getTotalQuestions() == null || resp.getTotalQuestions() == 0) {
+        if (resp.getTotalQuestions() == null || resp.getTotalQuestions() == 0) {
             resp.setTotalQuestions((int) count);
         }
         return resp;
@@ -149,7 +152,7 @@ public class ExamService {
                 .map(e -> {
                     ExamResponse resp = new ExamResponse(e);
                     long count = questionRepository.countByExamId(e.getId());
-                    if (count > 0 || resp.getTotalQuestions() == null || resp.getTotalQuestions() == 0) {
+                    if (resp.getTotalQuestions() == null || resp.getTotalQuestions() == 0) {
                         resp.setTotalQuestions((int) count);
                     }
                     return resp;
@@ -304,11 +307,15 @@ public class ExamService {
         codingQuestionRepository.deleteByExamId(exam.getExamCode());
         try {
             codingQuestionRepository.deleteByExamId(exam.getId().toString());
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.debug("Failed deleting coding questions by numeric examId string: {}", e.getMessage());
+        }
         cheatingLogRepository.deleteByExamId(exam.getExamCode());
         try {
             cheatingLogRepository.deleteByExamId(exam.getId().toString());
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.debug("Failed deleting cheating logs by numeric examId string: {}", e.getMessage());
+        }
 
         examRepository.delete(exam);
     }

@@ -119,7 +119,9 @@ public class ProctoringWebSocketHandler extends TextWebSocketHandler {
         } else if (sessIdObj instanceof String) {
             try {
                 targetSessionId = Long.parseLong((String) sessIdObj);
-            } catch (Exception ignored) {}
+            } catch (NumberFormatException nfe) {
+                log.debug("[WS] Invalid session id format: {}", sessIdObj);
+            }
         }
 
         if (targetSessionId == null) {

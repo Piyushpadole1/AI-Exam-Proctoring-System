@@ -342,7 +342,9 @@ public class FaceVerificationService {
         try {
             registeredEmbeddings = objectMapper.readValue(
                     profile.getEmbeddingsJson(), new TypeReference<List<List<Double>>>() {});
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.warn("Biometric deserialization fallback error: {}", e.getMessage());
+        }
 
         double threshold = ProctoringConstants.FACE_VERIFICATION_DISTANCE_THRESHOLD; // 0.40
         double bestDistance = 1.0;
@@ -417,11 +419,15 @@ public class FaceVerificationService {
         try {
             List<Double> storedAvg = objectMapper.readValue(p.getAverageEmbeddingJson(), new TypeReference<List<Double>>() {});
             map.put("averageEmbedding", storedAvg);
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.warn("Biometric deserialization fallback error: {}", e.getMessage());
+        }
         try {
             List<List<Double>> storedEmbeddings = objectMapper.readValue(p.getEmbeddingsJson(), new TypeReference<List<List<Double>>>() {});
             map.put("faceEmbeddings", storedEmbeddings);
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.warn("Biometric deserialization fallback error: {}", e.getMessage());
+        }
 
         return map;
     }
